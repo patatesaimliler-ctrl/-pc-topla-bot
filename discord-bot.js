@@ -14,9 +14,9 @@ const {
   TextInputStyle
 } = require("discord.js");
 
-// ==============================
+// =====================================================
 // AYARLAR
-// ==============================
+// =====================================================
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
@@ -25,86 +25,65 @@ const client = new Client({
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const REEF_KEY = process.env.REEF_KEY;
 
-// Kullanıcı oturumları
-const sessions = new Map();
-
-// ==============================
+// =====================================================
 // OYUNLAR
-// ==============================
+// =====================================================
 
 const games = {
-  valorant: {
-    name: "VALORANT",
-    cpu: "Ryzen 5 7500F",
-    gpu: "RTX 4060"
-  },
-
-  cs2: {
-    name: "CS2",
-    cpu: "Ryzen 5 7500F",
-    gpu: "RTX 4060"
-  },
-
-  gta5: {
-    name: "GTA V",
-    cpu: "Ryzen 5 5600",
-    gpu: "RX 7600"
-  },
-
-  rdr2: {
-    name: "Red Dead Redemption 2",
-    cpu: "Ryzen 5 7500F",
-    gpu: "RX 7700 XT"
-  },
-
-  minecraft: {
-    name: "Minecraft",
-    cpu: "Ryzen 5 5600",
-    gpu: "RTX 4060"
-  },
-
-  fortnite: {
-    name: "Fortnite",
-    cpu: "Ryzen 5 7500F",
-    gpu: "RTX 4060"
-  },
-
-  fc: {
-    name: "EA SPORTS FC",
-    cpu: "Ryzen 5 5600",
-    gpu: "RTX 4060"
-  }
+  valorant: "VALORANT",
+  cs2: "Counter-Strike 2",
+  gta5: "GTA V",
+  rdr2: "Red Dead Redemption 2",
+  minecraft: "Minecraft",
+  fortnite: "Fortnite",
+  fc: "EA SPORTS FC"
 };
 
-// ==============================
+// =====================================================
 // PARA
-// ==============================
+// =====================================================
 
-function money(number) {
-  return `${Math.round(number).toLocaleString("tr-TR")} TL`;
+function money(value) {
+  return `${Math.round(value).toLocaleString("tr-TR")} TL`;
 }
 
-// ==============================
+// =====================================================
+// STATE
+// =====================================================
+//
+// ARTIK Map YOK.
+// Bütün seçimler butonların customId'sinde taşınıyor.
+//
+
+function encodeState(state) {
+  return [
+    state.budget || 0,
+    state.game || "none",
+    state.package || "case",
+    state.cpu || "amd",
+    state.gpu || "nvidia"
+  ].join(".");
+}
+
+function decodeState(value) {
+  const parts = value.split(".");
+
+  return {
+    budget: Number(parts[0]) || 0,
+    game: parts[1] === "none" ? null : parts[1],
+    package: parts[2] || "case",
+    cpu: parts[3] || "amd",
+    gpu: parts[4] || "nvidia"
+  };
+}
+
+// =====================================================
 // REEF API
-// ==============================
+// =====================================================
 
-async function reefSearch(query, maxPrice = null) {
-
+async function reefSearch(query) {
   if (!REEF_KEY) {
     throw new Error("REEF_KEY bulunamadı.");
-  }
-
-  const body = {
-    query,
-    page: 1,
-    max_pages: 2,
-    sort: "price"
-  };
-
-  if (maxPrice) {
-    body.price = {
-      max: maxPrice
-    };
   }
 
   const response = await fetch(
@@ -113,59 +92,56 @@ async function reefSearch(query, maxPrice = null) {
       method: "POST",
 
       headers: {
-        "x-api-key": REEF_KEY,
-        "content-type": "application/json"
+        "Content-Type": "application/json",
+        "x-api-key": REEF_KEY
       },
 
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        query,
+        page: 1,
+        max_pages: 2,
+        sort: "price"
+      })
     }
   );
 
-  const json = await response.json();
+  const data = await response.json();
 
-  if (!response.ok || json.ok === false) {
+  if (!response.ok) {
     throw new Error(
-      json?.error?.message ||
-      `Reef API hatası: ${response.status}`
+      data?.error?.message ||
+      `Reef API ${response.status}`
     );
   }
 
-  return json.data?.results || [];
+  return data?.data?.results || [];
 }
 
-// ==============================
+// =====================================================
 // ÜRÜN BUL
-// ==============================
+// =====================================================
 
-async function findProduct(queries, maxPrice) {
-
+async function findProduct(queries, limit) {
   for (const query of queries) {
-
     try {
+      const results = await reefSearch(query);
 
-      const results = await reefSearch(
-        query,
-        maxPrice
-      );
-
-      const valid = results
+      const products = results
         .filter(product =>
           product &&
           typeof product.price === "number" &&
           product.price > 0 &&
-          product.price <= maxPrice
+          product.price <= limit
         )
-        .sort((a, b) =>
-          a.price - b.price
-        );
+        .sort((a, b) => a.price - b.price);
 
-      if (valid.length > 0) {
-        return valid[0];
+      if (products.length) {
+        return products[0];
       }
 
     } catch (error) {
       console.log(
-        `Ürün aranamadı (${query}):`,
+        `Arama hatası (${query}):`,
         error.message
       );
     }
@@ -174,112 +150,90 @@ async function findProduct(queries, maxPrice) {
   return null;
 }
 
-// ==============================
-// PC PARÇA ARAMALARI
-// ==============================
+// =====================================================
+// PARÇA SORGULARI
+// =====================================================
 
-function getPartQueries(session) {
+function getQueries(state) {
+  let cpuQueries;
+  let gpuQueries;
 
-  let cpu;
+  // ---------------- CPU ----------------
 
-  if (session.cpuBrand === "amd") {
-
-    if (session.budget < 45000) {
-      cpu = [
+  if (state.cpu === "amd") {
+    if (state.budget < 45000) {
+      cpuQueries = [
         "Ryzen 5 5600",
         "Ryzen 5 5500"
       ];
-    }
-
-    else if (session.budget < 80000) {
-      cpu = [
+    } else if (state.budget < 80000) {
+      cpuQueries = [
         "Ryzen 5 7500F",
         "Ryzen 5 7600"
       ];
-    }
-
-    else {
-      cpu = [
+    } else {
+      cpuQueries = [
         "Ryzen 7 7800X3D",
         "Ryzen 7 9800X3D"
       ];
     }
-
   } else {
-
-    if (session.budget < 45000) {
-      cpu = [
+    if (state.budget < 45000) {
+      cpuQueries = [
         "Intel Core i5 12400F",
         "Intel Core i3 12100F"
       ];
-    }
-
-    else if (session.budget < 80000) {
-      cpu = [
+    } else if (state.budget < 80000) {
+      cpuQueries = [
         "Intel Core i5 14400F",
         "Intel Core i5 14600KF"
       ];
-    }
-
-    else {
-      cpu = [
+    } else {
+      cpuQueries = [
         "Intel Core i7 14700F",
         "Intel Core Ultra 7"
       ];
     }
   }
 
-  let gpu;
+  // ---------------- GPU ----------------
 
-  if (session.gpuBrand === "nvidia") {
-
-    if (session.budget < 45000) {
-      gpu = [
+  if (state.gpu === "nvidia") {
+    if (state.budget < 45000) {
+      gpuQueries = [
         "RTX 4060",
         "RTX 3050"
       ];
-    }
-
-    else if (session.budget < 80000) {
-      gpu = [
+    } else if (state.budget < 80000) {
+      gpuQueries = [
         "RTX 4060",
         "RTX 4060 Ti",
         "RTX 5060"
       ];
-    }
-
-    else if (session.budget < 120000) {
-      gpu = [
+    } else if (state.budget < 120000) {
+      gpuQueries = [
         "RTX 5070",
         "RTX 4070 Super"
       ];
-    }
-
-    else {
-      gpu = [
+    } else {
+      gpuQueries = [
         "RTX 5080",
         "RTX 5090"
       ];
     }
-
   } else {
-
-    if (session.budget < 45000) {
-      gpu = [
+    if (state.budget < 45000) {
+      gpuQueries = [
         "RX 7600",
         "RX 6600"
       ];
-    }
-
-    else if (session.budget < 80000) {
-      gpu = [
+    } else if (state.budget < 80000) {
+      gpuQueries = [
         "RX 7700 XT",
         "RX 7800 XT"
       ];
-    }
-
-    else {
-      gpu = [
+    } else {
+      gpuQueries = [
         "RX 9070 XT",
         "RX 7900 XTX"
       ];
@@ -287,27 +241,45 @@ function getPartQueries(session) {
   }
 
   return {
-    cpu,
+    cpu: cpuQueries,
 
-    gpu,
+    gpu: gpuQueries,
 
     ram:
-      session.budget < 50000
-        ? ["16GB DDR4 RAM", "16GB RAM"]
-        : ["32GB DDR5 RAM", "32GB DDR5 6000"],
+      state.budget < 50000
+        ? [
+            "16GB DDR4 RAM",
+            "16GB RAM"
+          ]
+        : [
+            "32GB DDR5 RAM",
+            "32GB DDR5 6000"
+          ],
 
     ssd:
-      session.budget < 60000
-        ? ["1TB NVMe SSD", "500GB NVMe SSD"]
-        : ["1TB NVMe SSD", "2TB NVMe SSD"],
+      state.budget < 60000
+        ? [
+            "1TB NVMe SSD",
+            "500GB NVMe SSD"
+          ]
+        : [
+            "1TB NVMe SSD",
+            "2TB NVMe SSD"
+          ],
 
     motherboard:
-      session.cpuBrand === "amd"
-        ? ["B650 Anakart", "B550 Anakart"]
-        : ["B760 Anakart", "B660 Anakart"],
+      state.cpu === "amd"
+        ? [
+            "B650 Anakart",
+            "B550 Anakart"
+          ]
+        : [
+            "B760 Anakart",
+            "B660 Anakart"
+          ],
 
     psu:
-      session.budget < 60000
+      state.budget < 60000
         ? [
             "650W 80 Plus Bronze PSU",
             "550W 80 Plus Bronze PSU"
@@ -324,198 +296,200 @@ function getPartQueries(session) {
   };
 }
 
-// ==============================
-// OYUN MENÜSÜ
-// ==============================
-
-function gameMenu(session) {
-
-  return new ActionRowBuilder()
-    .addComponents(
-
-      new StringSelectMenuBuilder()
-        .setCustomId("game_select")
-        .setPlaceholder(
-          session.game
-            ? `🎮 ${games[session.game].name}`
-            : "🎮 Oyun seç"
-        )
-        .addOptions(
-          Object.entries(games).map(
-            ([id, game]) => ({
-              label: game.name,
-              value: id,
-              emoji: "🎮"
-            })
-          )
-        )
-    );
-}
-
-// ==============================
+// =====================================================
 // ANA PANEL
-// ==============================
+// =====================================================
 
-function mainMenu(session) {
+function createPanel(state) {
+  const stateId = encodeState(state);
 
   const embed = new EmbedBuilder()
     .setTitle("🖥️ PC TOPLA")
     .setDescription(
       "## 🚀 PC Builder\n\n" +
-
       "Seçimlerini aşağıdaki panelden yap.\n" +
-      "Tuşlara bastığında **mesaj gönderilmez**, " +
-      "sadece seçimlerin güncellenir.\n\n" +
+      "Tuşlara bastığında **yeni mesaj gönderilmez.**\n" +
+      "Seçimlerin sadece bu panelde güncellenir.\n\n" +
 
       `💰 **Bütçe:** ${
-        session.budget
-          ? money(session.budget)
+        state.budget
+          ? money(state.budget)
           : "Henüz seçilmedi"
       }\n` +
 
       `🎮 **Oyun:** ${
-        session.game
-          ? games[session.game].name
+        state.game
+          ? games[state.game]
           : "Henüz seçilmedi"
       }\n` +
 
       `📦 **Paket:** ${
-        session.package === "full"
+        state.package === "full"
           ? "🎒 Wraith Full Paket"
           : "🖥️ Sadece Kasa"
       }\n` +
 
       `🧠 **CPU:** ${
-        session.cpuBrand === "amd"
+        state.cpu === "amd"
           ? "AMD"
           : "Intel"
       }\n` +
 
       `🎮 **GPU:** ${
-        session.gpuBrand === "nvidia"
+        state.gpu === "nvidia"
           ? "NVIDIA"
           : "AMD"
       }\n\n` +
 
       "━━━━━━━━━━━━━━━━━━\n" +
 
-      "🚀 Hazır olduğunda **PC'Yİ OLUŞTUR** butonuna bas."
+      "🚀 Her şeyi seçtikten sonra **PC'Yİ OLUŞTUR** butonuna bas."
     )
     .setFooter({
-      text: "PC Builder • Canlı Trendyol fiyatları"
+      text: "PC Builder • Canlı fiyat sistemi"
     });
 
-  const budgetRow =
-    new ActionRowBuilder()
-      .addComponents(
+  // =================================================
+  // BÜTÇE + PAKET
+  // =================================================
 
-        new ButtonBuilder()
-          .setCustomId("budget")
-          .setLabel("💰 Bütçe")
-          .setStyle(ButtonStyle.Primary),
+  const row1 = new ActionRowBuilder()
+    .addComponents(
 
-        new ButtonBuilder()
-          .setCustomId("package_case")
-          .setLabel("🖥️ Sadece Kasa")
-          .setStyle(
-            session.package === "case"
-              ? ButtonStyle.Success
-              : ButtonStyle.Secondary
-          ),
+      new ButtonBuilder()
+        .setCustomId(`budget|${stateId}`)
+        .setLabel("💰 Bütçe")
+        .setStyle(ButtonStyle.Primary),
 
-        new ButtonBuilder()
-          .setCustomId("package_full")
-          .setLabel("🎒 Wraith Full Paket")
-          .setStyle(
-            session.package === "full"
-              ? ButtonStyle.Success
-              : ButtonStyle.Secondary
+      new ButtonBuilder()
+        .setCustomId(`case|${stateId}`)
+        .setLabel("🖥️ Sadece Kasa")
+        .setStyle(
+          state.package === "case"
+            ? ButtonStyle.Success
+            : ButtonStyle.Secondary
+        ),
+
+      new ButtonBuilder()
+        .setCustomId(`full|${stateId}`)
+        .setLabel("🎒 Wraith Full Paket")
+        .setStyle(
+          state.package === "full"
+            ? ButtonStyle.Success
+            : ButtonStyle.Secondary
+        )
+    );
+
+  // =================================================
+  // OYUN
+  // =================================================
+
+  const gameRow = new ActionRowBuilder()
+    .addComponents(
+
+      new StringSelectMenuBuilder()
+        .setCustomId(`game|${stateId}`)
+        .setPlaceholder(
+          state.game
+            ? `🎮 ${games[state.game]}`
+            : "🎮 Oyun seç"
+        )
+        .addOptions(
+          Object.entries(games).map(
+            ([id, name]) => ({
+              label: name,
+              value: id,
+              emoji: "🎮"
+            })
           )
-      );
+        )
+    );
 
-  const cpuRow =
-    new ActionRowBuilder()
-      .addComponents(
+  // =================================================
+  // CPU
+  // =================================================
 
-        new ButtonBuilder()
-          .setCustomId("cpu_amd")
-          .setLabel("🧠 AMD")
-          .setStyle(
-            session.cpuBrand === "amd"
-              ? ButtonStyle.Primary
-              : ButtonStyle.Secondary
-          ),
+  const cpuRow = new ActionRowBuilder()
+    .addComponents(
 
-        new ButtonBuilder()
-          .setCustomId("cpu_intel")
-          .setLabel("🧠 Intel")
-          .setStyle(
-            session.cpuBrand === "intel"
-              ? ButtonStyle.Primary
-              : ButtonStyle.Secondary
-          ),
+      new ButtonBuilder()
+        .setCustomId(`cpuamd|${stateId}`)
+        .setLabel("🧠 AMD")
+        .setStyle(
+          state.cpu === "amd"
+            ? ButtonStyle.Primary
+            : ButtonStyle.Secondary
+        ),
 
-        new ButtonBuilder()
-          .setCustomId("gpu_nvidia")
-          .setLabel("🎮 NVIDIA")
-          .setStyle(
-            session.gpuBrand === "nvidia"
-              ? ButtonStyle.Primary
-              : ButtonStyle.Secondary
-          ),
+      new ButtonBuilder()
+        .setCustomId(`cpuintel|${stateId}`)
+        .setLabel("🧠 Intel")
+        .setStyle(
+          state.cpu === "intel"
+            ? ButtonStyle.Primary
+            : ButtonStyle.Secondary
+        ),
 
-        new ButtonBuilder()
-          .setCustomId("gpu_amd")
-          .setLabel("🎮 AMD GPU")
-          .setStyle(
-            session.gpuBrand === "amd"
-              ? ButtonStyle.Primary
-              : ButtonStyle.Secondary
-          )
-      );
+      new ButtonBuilder()
+        .setCustomId(`gpunvidia|${stateId}`)
+        .setLabel("🎮 NVIDIA")
+        .setStyle(
+          state.gpu === "nvidia"
+            ? ButtonStyle.Primary
+            : ButtonStyle.Secondary
+        ),
 
-  const buildRow =
-    new ActionRowBuilder()
-      .addComponents(
+      new ButtonBuilder()
+        .setCustomId(`gpuamd|${stateId}`)
+        .setLabel("🎮 AMD GPU")
+        .setStyle(
+          state.gpu === "amd"
+            ? ButtonStyle.Primary
+            : ButtonStyle.Secondary
+        )
+    );
 
-        new ButtonBuilder()
-          .setCustomId("build")
-          .setLabel("🚀 PC'Yİ OLUŞTUR")
-          .setStyle(ButtonStyle.Success)
-      );
+  // =================================================
+  // OLUŞTUR
+  // =================================================
+
+  const buildRow = new ActionRowBuilder()
+    .addComponents(
+
+      new ButtonBuilder()
+        .setCustomId(`build|${stateId}`)
+        .setLabel("🚀 PC'Yİ OLUŞTUR")
+        .setStyle(ButtonStyle.Success)
+    );
 
   return {
     embeds: [embed],
-
     components: [
-      budgetRow,
-      gameMenu(session),
+      row1,
+      gameRow,
       cpuRow,
       buildRow
     ]
   };
 }
 
-// ==============================
+// =====================================================
 // BÜTÇE MODAL
-// ==============================
+// =====================================================
 
-function budgetModal() {
+function createBudgetModal(stateId) {
+  const modal = new ModalBuilder()
+    .setCustomId(`budgetmodal|${stateId}`)
+    .setTitle("💰 Bütçe Gir");
 
-  const modal =
-    new ModalBuilder()
-      .setCustomId("budget_modal")
-      .setTitle("💰 PC Bütçesi");
-
-  const input =
-    new TextInputBuilder()
-      .setCustomId("budget_input")
-      .setLabel("Bütçeni TL olarak yaz")
-      .setPlaceholder("Örn: 75000")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true)
-      .setMinLength(4)
-      .setMaxLength(7);
+  const input = new TextInputBuilder()
+    .setCustomId("budget")
+    .setLabel("Bütçen kaç TL?")
+    .setPlaceholder("Örn: 75000")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMinLength(4)
+    .setMaxLength(7);
 
   modal.addComponents(
     new ActionRowBuilder()
@@ -525,39 +499,32 @@ function budgetModal() {
   return modal;
 }
 
-// ==============================
+// =====================================================
 // SLASH KOMUT
-// ==============================
+// =====================================================
 
 const commands = [
-
   new SlashCommandBuilder()
     .setName("pctopla")
     .setDescription(
-      "Butonlarla kendi PC sistemini oluştur."
+      "Butonlarla PC sistemi oluştur."
     )
+].map(command => command.toJSON());
 
-].map(command =>
-  command.toJSON()
-);
+const rest = new REST({
+  version: "10"
+}).setToken(DISCORD_TOKEN);
 
-const rest =
-  new REST({
-    version: "10"
-  }).setToken(DISCORD_TOKEN);
-
-// ==============================
-// BOT READY
-// ==============================
+// =====================================================
+// READY
+// =====================================================
 
 client.once("ready", async () => {
-
   console.log(
     `✅ Bot aktif: ${client.user.tag}`
   );
 
   try {
-
     await rest.put(
       Routes.applicationCommands(
         client.user.id
@@ -568,116 +535,87 @@ client.once("ready", async () => {
     );
 
     console.log(
-      "✅ /pctopla komutu kaydedildi."
+      "✅ /pctopla hazır."
     );
 
   } catch (error) {
-
     console.error(
-      "❌ Komut kayıt hatası:",
+      "❌ Slash komut hatası:",
       error
     );
   }
 });
 
-// ==============================
-// ETKİLEŞİMLER
-// ==============================
+// =====================================================
+// INTERACTIONS
+// =====================================================
 
 client.on(
   "interactionCreate",
   async interaction => {
 
-    // ==========================
+    // =================================================
     // /pctopla
-    // ==========================
+    // =================================================
 
     if (
       interaction.isChatInputCommand() &&
       interaction.commandName === "pctopla"
     ) {
 
-      const session = {
-
-        budget: null,
-
+      const state = {
+        budget: 0,
         game: null,
-
         package: "case",
-
-        cpuBrand: "amd",
-
-        gpuBrand: "nvidia"
+        cpu: "amd",
+        gpu: "nvidia"
       };
 
-      sessions.set(
-        interaction.user.id,
-        session
-      );
-
       await interaction.reply({
-        ...mainMenu(session),
+        ...createPanel(state),
         ephemeral: true
       });
 
       return;
     }
 
-    // ==========================
-    // OTURUM
-    // ==========================
-
-    const session =
-      sessions.get(
-        interaction.user.id
-      );
-
-    if (!session) {
-
-      if (
-        interaction.isButton() ||
-        interaction.isStringSelectMenu() ||
-        interaction.isModalSubmit()
-      ) {
-
-        await interaction.reply({
-          content:
-            "❌ Oturumun süresi dolmuş. `/pctopla` ile yeniden başla.",
-          ephemeral: true
-        });
-      }
-
-      return;
-    }
-
-    // ==========================
-    // BÜTÇE BUTONU
-    // ==========================
+    // =================================================
+    // BÜTÇE
+    // =================================================
 
     if (
       interaction.isButton() &&
-      interaction.customId === "budget"
+      interaction.customId.startsWith("budget|")
     ) {
 
+      const stateId =
+        interaction.customId.split("|")[1];
+
       await interaction.showModal(
-        budgetModal()
+        createBudgetModal(stateId)
       );
 
       return;
     }
 
-    // ==========================
+    // =================================================
     // BÜTÇE MODAL
-    // ==========================
+    // =================================================
 
     if (
       interaction.isModalSubmit() &&
-      interaction.customId === "budget_modal"
+      interaction.customId.startsWith("budgetmodal|")
     ) {
+
+      const stateId =
+        interaction.customId.split("|")[1];
+
+      const state =
+        decodeState(stateId);
 
       const raw =
         interaction.fields.getTextInputValue(
-          "budget_input"
+          "budget"
         );
 
       const budget =
@@ -703,500 +641,505 @@ client.on(
         return;
       }
 
-      session.budget =
+      state.budget =
         Math.floor(budget);
 
       await interaction.update(
-        mainMenu(session)
+        createPanel(state)
       );
 
       return;
     }
 
-    // ==========================
-    // PAKET
-    // ==========================
+    // =================================================
+    // DİĞER BUTONLAR
+    // =================================================
 
     if (
-      interaction.isButton() &&
-      interaction.customId === "package_case"
+      interaction.isButton()
     ) {
 
-      session.package = "case";
+      const [action, stateId] =
+        interaction.customId.split("|");
 
-      await interaction.update(
-        mainMenu(session)
-      );
+      if (!stateId) return;
 
-      return;
-    }
+      const state =
+        decodeState(stateId);
 
-    if (
-      interaction.isButton() &&
-      interaction.customId === "package_full"
-    ) {
+      // -------------------------------
+      // KASA
+      // -------------------------------
 
-      session.package = "full";
+      if (action === "case") {
+        state.package = "case";
 
-      await interaction.update(
-        mainMenu(session)
-      );
-
-      return;
-    }
-
-    // ==========================
-    // CPU
-    // ==========================
-
-    if (
-      interaction.isButton() &&
-      interaction.customId === "cpu_amd"
-    ) {
-
-      session.cpuBrand = "amd";
-
-      await interaction.update(
-        mainMenu(session)
-      );
-
-      return;
-    }
-
-    if (
-      interaction.isButton() &&
-      interaction.customId === "cpu_intel"
-    ) {
-
-      session.cpuBrand = "intel";
-
-      await interaction.update(
-        mainMenu(session)
-      );
-
-      return;
-    }
-
-    // ==========================
-    // GPU
-    // ==========================
-
-    if (
-      interaction.isButton() &&
-      interaction.customId === "gpu_nvidia"
-    ) {
-
-      session.gpuBrand = "nvidia";
-
-      await interaction.update(
-        mainMenu(session)
-      );
-
-      return;
-    }
-
-    if (
-      interaction.isButton() &&
-      interaction.customId === "gpu_amd"
-    ) {
-
-      session.gpuBrand = "amd";
-
-      await interaction.update(
-        mainMenu(session)
-      );
-
-      return;
-    }
-
-    // ==========================
-    // OYUN
-    // ==========================
-
-    if (
-      interaction.isStringSelectMenu() &&
-      interaction.customId === "game_select"
-    ) {
-
-      session.game =
-        interaction.values[0];
-
-      await interaction.update(
-        mainMenu(session)
-      );
-
-      return;
-    }
-
-    // ==========================
-    // PC OLUŞTUR
-    // ==========================
-
-    if (
-      interaction.isButton() &&
-      interaction.customId === "build"
-    ) {
-
-      if (!session.budget) {
-
-        await interaction.reply({
-          content:
-            "💰 Önce bütçeni gir knk.",
-          ephemeral: true
-        });
-
-        return;
-      }
-
-      if (!session.game) {
-
-        await interaction.reply({
-          content:
-            "🎮 Önce oynayacağın oyunu seç.",
-          ephemeral: true
-        });
-
-        return;
-      }
-
-      await interaction.update({
-
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("🔎 PC Builder çalışıyor...")
-            .setDescription(
-              "Canlı fiyatlar aranıyor.\n\n" +
-              "🧠 İşlemci\n" +
-              "🎮 Ekran kartı\n" +
-              "🧩 RAM\n" +
-              "💾 SSD\n" +
-              "🔧 Anakart\n" +
-              "⚡ PSU\n" +
-              "📦 Kasa\n\n" +
-              "Biraz fiyat avlıyorum... 🕵️"
-            )
-        ],
-
-        components: []
-      });
-
-      try {
-
-        const queries =
-          getPartQueries(session);
-
-        /*
-         * Bütçeyi aşmamak için parçaların
-         * toplamına göre limitleri hesaplıyoruz.
-         */
-
-        const budget =
-          session.budget;
-
-        const cpuBudget =
-          Math.floor(
-            budget * 0.20
-          );
-
-        const gpuBudget =
-          Math.floor(
-            budget * 0.40
-          );
-
-        const ramBudget =
-          Math.floor(
-            budget * 0.08
-          );
-
-        const ssdBudget =
-          Math.floor(
-            budget * 0.08
-          );
-
-        const motherboardBudget =
-          Math.floor(
-            budget * 0.12
-          );
-
-        const psuBudget =
-          Math.floor(
-            budget * 0.07
-          );
-
-        const caseBudget =
-          Math.floor(
-            budget * 0.10
-          );
-
-        const results =
-          await Promise.all([
-
-            findProduct(
-              queries.cpu,
-              cpuBudget
-            ),
-
-            findProduct(
-              queries.gpu,
-              gpuBudget
-            ),
-
-            findProduct(
-              queries.ram,
-              ramBudget
-            ),
-
-            findProduct(
-              queries.ssd,
-              ssdBudget
-            ),
-
-            findProduct(
-              queries.motherboard,
-              motherboardBudget
-            ),
-
-            findProduct(
-              queries.psu,
-              psuBudget
-            ),
-
-            findProduct(
-              queries.case,
-              caseBudget
-            )
-          ]);
-
-        const [
-          cpu,
-          gpu,
-          ram,
-          ssd,
-          motherboard,
-          psu,
-          pcCase
-        ] = results;
-
-        const parts = [
-          {
-            name: "🧠 İşlemci",
-            product: cpu
-          },
-          {
-            name: "🎮 Ekran Kartı",
-            product: gpu
-          },
-          {
-            name: "🧩 RAM",
-            product: ram
-          },
-          {
-            name: "💾 SSD",
-            product: ssd
-          },
-          {
-            name: "🔧 Anakart",
-            product: motherboard
-          },
-          {
-            name: "⚡ PSU",
-            product: psu
-          },
-          {
-            name: "📦 Kasa",
-            product: pcCase
-          }
-        ];
-
-        // ======================
-        // BULUNAMAYAN PARÇA
-        // ======================
-
-        if (
-          parts.some(
-            part => !part.product
-          )
-        ) {
-
-          await interaction.editReply({
-
-            embeds: [
-              new EmbedBuilder()
-                .setTitle(
-                  "❌ Sistem oluşturulamadı"
-                )
-                .setDescription(
-                  "Bazı parçaların fiyatını canlı olarak bulamadım.\n\n" +
-                  "Bütçeni artırmayı değil, başka ürün kombinasyonu denemeyi tercih ederim. 😎"
-                )
-            ],
-
-            components: []
-          });
-
-          return;
-        }
-
-        // ======================
-        // TOPLAM
-        // ======================
-
-        let total = 0;
-
-        for (const part of parts) {
-
-          total +=
-            Number(
-              part.product.price
-            );
-        }
-
-        // ======================
-        // BÜTÇE GARANTİSİ
-        // ======================
-
-        if (total > budget) {
-
-          await interaction.editReply({
-
-            embeds: [
-              new EmbedBuilder()
-                .setTitle(
-                  "💸 Bütçe duvarına çarptık"
-                )
-                .setDescription(
-                  `Toplam: **${money(total)}**\n` +
-                  `Bütçe: **${money(budget)}**\n\n` +
-                  "Bu sistem bütçeyi geçtiği için bunu önermiyorum. " +
-                  "PC Builder'ın bütçe departmanı veto bastı. 🗿"
-                )
-            ],
-
-            components: []
-          });
-
-          return;
-        }
-
-        // ======================
-        // SONUÇ
-        // ======================
-
-        const embed =
-          new EmbedBuilder()
-            .setTitle(
-              "🚀 PC BUILDER SONUCU"
-            )
-            .setDescription(
-
-              `🎮 **Oyun:** ${games[session.game].name}\n` +
-
-              `💰 **Bütçe:** ${money(budget)}\n` +
-
-              `📦 **Paket:** ${
-                session.package === "full"
-                  ? "🎒 Wraith Full Paket"
-                  : "🖥️ Sadece Kasa"
-              }\n\n` +
-
-              `💵 **Toplam:** ${money(total)}\n` +
-
-              `🟢 **Bütçede kalan:** ${money(
-                budget - total
-              )}\n\n` +
-
-              "━━━━━━━━━━━━━━━━━━"
-            )
-            .setFooter({
-              text:
-                total > 120000
-                  ? "💀 120K+ bölgesine giriş yaptın. Cüzdan başarıyla korktu."
-                  : "PC Builder • Canlı Trendyol fiyatları"
-            });
-
-        for (
-          const part of parts
-        ) {
-
-          const product =
-            part.product;
-
-          embed.addFields({
-
-            name: part.name,
-
-            value:
-
-              `**${product.title}**\n` +
-
-              `💰 **${money(
-                product.price
-              )}**\n` +
-
-              `🏪 ${product.brand || "Marka belirtilmemiş"}\n` +
-
-              `[🛒 Ürüne git](${product.url})`,
-
-            inline: false
-          });
-        }
-
-        if (
-          session.budget > 120000
-        ) {
-
-          embed.addFields({
-
-            name:
-              "💀 120K+ Uyarısı",
-
-            value:
-              "Bu bütçede artık PC toplamıyorsun, " +
-              "anakarta küçük bir villa yaptırıyorsun. 😭",
-
-            inline: false
-          });
-        }
-
-        await interaction.editReply({
-
-          embeds: [embed],
-
-          components: []
-        });
-
-      } catch (error) {
-
-        console.error(
-          "PC OLUŞTURMA HATASI:",
-          error
+        await interaction.update(
+          createPanel(state)
         );
 
-        await interaction.editReply({
+        return;
+      }
+
+      // -------------------------------
+      // FULL
+      // -------------------------------
+
+      if (action === "full") {
+        state.package = "full";
+
+        await interaction.update(
+          createPanel(state)
+        );
+
+        return;
+      }
+
+      // -------------------------------
+      // AMD CPU
+      // -------------------------------
+
+      if (action === "cpuamd") {
+        state.cpu = "amd";
+
+        await interaction.update(
+          createPanel(state)
+        );
+
+        return;
+      }
+
+      // -------------------------------
+      // INTEL CPU
+      // -------------------------------
+
+      if (action === "cpuintel") {
+        state.cpu = "intel";
+
+        await interaction.update(
+          createPanel(state)
+        );
+
+        return;
+      }
+
+      // -------------------------------
+      // NVIDIA GPU
+      // -------------------------------
+
+      if (action === "gpunvidia") {
+        state.gpu = "nvidia";
+
+        await interaction.update(
+          createPanel(state)
+        );
+
+        return;
+      }
+
+      // -------------------------------
+      // AMD GPU
+      // -------------------------------
+
+      if (action === "gpuamd") {
+        state.gpu = "amd";
+
+        await interaction.update(
+          createPanel(state)
+        );
+
+        return;
+      }
+
+      // =================================================
+      // PC OLUŞTUR
+      // =================================================
+
+      if (action === "build") {
+
+        if (!state.budget) {
+
+          await interaction.reply({
+            content:
+              "💰 Önce bütçeni gir.",
+            ephemeral: true
+          });
+
+          return;
+        }
+
+        if (!state.game) {
+
+          await interaction.reply({
+            content:
+              "🎮 Önce oynayacağın oyunu seç.",
+            ephemeral: true
+          });
+
+          return;
+        }
+
+        await interaction.update({
 
           embeds: [
             new EmbedBuilder()
               .setTitle(
-                "❌ Fiyat sistemi hata verdi"
+                "🔎 PC BUILDER ÇALIŞIYOR"
               )
               .setDescription(
-                "ReefAPI'den canlı fiyatları alırken bir sorun çıktı.\n\n" +
-                `\`${error.message}\``
+                "Canlı fiyatlar aranıyor...\n\n" +
+                "🧠 İşlemci\n" +
+                "🎮 Ekran kartı\n" +
+                "🧩 RAM\n" +
+                "💾 SSD\n" +
+                "🔧 Anakart\n" +
+                "⚡ PSU\n" +
+                "📦 Kasa\n\n" +
+                "Fiyat avına çıktım. 🕵️"
               )
           ],
 
           components: []
         });
+
+        try {
+
+          const queries =
+            getQueries(state);
+
+          // =================================================
+          // BÜTÇE DAĞILIMI
+          // =================================================
+
+          const budget =
+            state.budget;
+
+          const cpuLimit =
+            Math.floor(budget * 0.20);
+
+          const gpuLimit =
+            Math.floor(budget * 0.40);
+
+          const ramLimit =
+            Math.floor(budget * 0.08);
+
+          const ssdLimit =
+            Math.floor(budget * 0.08);
+
+          const motherboardLimit =
+            Math.floor(budget * 0.12);
+
+          const psuLimit =
+            Math.floor(budget * 0.07);
+
+          const caseLimit =
+            Math.floor(budget * 0.05);
+
+          // =================================================
+          // CANLI ARAMA
+          // =================================================
+
+          const [
+            cpu,
+            gpu,
+            ram,
+            ssd,
+            motherboard,
+            psu,
+            pcCase
+          ] = await Promise.all([
+
+            findProduct(
+              queries.cpu,
+              cpuLimit
+            ),
+
+            findProduct(
+              queries.gpu,
+              gpuLimit
+            ),
+
+            findProduct(
+              queries.ram,
+              ramLimit
+            ),
+
+            findProduct(
+              queries.ssd,
+              ssdLimit
+            ),
+
+            findProduct(
+              queries.motherboard,
+              motherboardLimit
+            ),
+
+            findProduct(
+              queries.psu,
+              psuLimit
+            ),
+
+            findProduct(
+              queries.case,
+              caseLimit
+            )
+          ]);
+
+          const parts = [
+            {
+              name: "🧠 İşlemci",
+              product: cpu
+            },
+            {
+              name: "🎮 Ekran Kartı",
+              product: gpu
+            },
+            {
+              name: "🧩 RAM",
+              product: ram
+            },
+            {
+              name: "💾 SSD",
+              product: ssd
+            },
+            {
+              name: "🔧 Anakart",
+              product: motherboard
+            },
+            {
+              name: "⚡ PSU",
+              product: psu
+            },
+            {
+              name: "📦 Kasa",
+              product: pcCase
+            }
+          ];
+
+          // =================================================
+          // EKSİK PARÇA
+          // =================================================
+
+          const missing =
+            parts.filter(
+              part => !part.product
+            );
+
+          if (missing.length) {
+
+            await interaction.editReply({
+
+              embeds: [
+                new EmbedBuilder()
+                  .setTitle(
+                    "❌ Sistem oluşturulamadı"
+                  )
+                  .setDescription(
+                    "Bütçene uygun tüm parçaları canlı olarak bulamadım.\n\n" +
+                    missing
+                      .map(
+                        x => x.name
+                      )
+                      .join("\n")
+                  )
+              ],
+
+              components: []
+            });
+
+            return;
+          }
+
+          // =================================================
+          // TOPLAM
+          // =================================================
+
+          const total =
+            parts.reduce(
+              (sum, part) =>
+                sum +
+                Number(
+                  part.product.price
+                ),
+              0
+            );
+
+          // =================================================
+          // BÜTÇE KONTROLÜ
+          // =================================================
+
+          if (total > budget) {
+
+            await interaction.editReply({
+
+              embeds: [
+                new EmbedBuilder()
+                  .setTitle(
+                    "💸 Bütçe aşımı"
+                  )
+                  .setDescription(
+                    `💰 Bütçe: **${money(budget)}**\n` +
+                    `💵 Sistem: **${money(total)}**\n\n` +
+                    "Bu sistemi göndermiyorum çünkü **bütçeyi geçiyor.**"
+                  )
+              ],
+
+              components: []
+            });
+
+            return;
+          }
+
+          // =================================================
+          // SONUÇ
+          // =================================================
+
+          const embed =
+            new EmbedBuilder()
+              .setTitle(
+                "🚀 PC BUILDER SONUCU"
+              )
+              .setDescription(
+
+                `🎮 **Oyun:** ${
+                  games[state.game]
+                }\n` +
+
+                `💰 **Bütçe:** ${
+                  money(budget)
+                }\n` +
+
+                `📦 **Paket:** ${
+                  state.package === "full"
+                    ? "🎒 Wraith Full Paket"
+                    : "🖥️ Sadece Kasa"
+                }\n\n` +
+
+                `💵 **Toplam:** ${
+                  money(total)
+                }\n` +
+
+                `🟢 **Kalan:** ${
+                  money(
+                    budget - total
+                  )
+                }\n\n` +
+
+                "━━━━━━━━━━━━━━━━━━"
+              )
+              .setFooter({
+                text:
+                  budget > 120000
+                    ? "💀 120K+ bölgesi: Cüzdan güvenlik protokolünü başlattı."
+                    : "PC Builder • Canlı fiyatlar"
+              });
+
+          // =================================================
+          // PARÇALAR
+          // =================================================
+
+          for (const part of parts) {
+
+            const product =
+              part.product;
+
+            embed.addFields({
+
+              name: part.name,
+
+              value:
+                `**${product.title}**\n` +
+                `💰 **${money(product.price)}**\n` +
+                `🏪 ${product.brand || "Bilinmiyor"}\n` +
+                `[🛒 Ürüne git](${product.url})`,
+
+              inline: false
+            });
+          }
+
+          // =================================================
+          // 120K+ MİZAH
+          // =================================================
+
+          if (budget > 120000) {
+
+            embed.addFields({
+
+              name: "💀 120K+ BÖLGESİ",
+
+              value:
+                "Bu bütçede artık PC toplamıyorsun, " +
+                "ekran kartına tapu çıkartıyorsun. 😭",
+
+              inline: false
+            });
+          }
+
+          await interaction.editReply({
+
+            embeds: [embed],
+
+            components: []
+          });
+
+        } catch (error) {
+
+          console.error(
+            "PC OLUŞTURMA HATASI:",
+            error
+          );
+
+          await interaction.editReply({
+
+            embeds: [
+              new EmbedBuilder()
+                .setTitle(
+                  "❌ Canlı fiyat hatası"
+                )
+                .setDescription(
+                  "ReefAPI'den fiyatları alırken hata oluştu.\n\n" +
+                  `\`${error.message}\``
+                )
+            ],
+
+            components: []
+          });
+        }
+
+        return;
       }
+    }
+
+    // =================================================
+    // OYUN SEÇİMİ
+    // =================================================
+
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId.startsWith("game|")
+    ) {
+
+      const stateId =
+        interaction.customId.split("|")[1];
+
+      const state =
+        decodeState(stateId);
+
+      state.game =
+        interaction.values[0];
+
+      await interaction.update(
+        createPanel(state)
+      );
 
       return;
     }
   }
 );
 
-// ==============================
-// BOTU BAŞLAT
-// ==============================
+// =====================================================
+// BAŞLAT
+// =====================================================
 
 client.login(
   DISCORD_TOKEN
