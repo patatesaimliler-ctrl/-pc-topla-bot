@@ -13,44 +13,51 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
+/* =========================
+   SLASH COMMAND
+========================= */
+
 const commands = [
   new SlashCommandBuilder()
     .setName("pc-topla")
     .setDescription("Akakçe güncel fiyatlarıyla PC toplar.")
+
     .addIntegerOption(option =>
       option
         .setName("butce")
-        .setDescription("Bütçen TL")
+        .setDescription("Bütçen TL olarak")
         .setRequired(true)
         .setMinValue(15000)
         .setMaxValue(500000)
     )
+
     .addStringOption(option =>
       option
         .setName("kullanim")
         .setDescription("Kullanım amacı")
         .setRequired(true)
         .addChoices(
-          { name: "🎮 Oyun", value: "oyun" },
-          { name: "📺 Yayın", value: "yayin" },
-          { name: "🎮📺 Oyun + Yayın", value: "oyun-yayin" },
-          { name: "💼 İş", value: "is" }
+          { name: "Oyun", value: "oyun" },
+          { name: "Yayın", value: "yayin" },
+          { name: "İş", value: "is" }
         )
     )
+
     .addStringOption(option =>
       option
         .setName("cpu")
-        .setDescription("İşlemci markası")
+        .setDescription("İşlemci tercihi")
         .setRequired(true)
         .addChoices(
           { name: "AMD", value: "amd" },
           { name: "Intel", value: "intel" }
         )
     )
+
     .addStringOption(option =>
       option
         .setName("gpu")
-        .setDescription("Ekran kartı markası")
+        .setDescription("Ekran kartı tercihi")
         .setRequired(true)
         .addChoices(
           { name: "NVIDIA", value: "nvidia" },
@@ -59,40 +66,58 @@ const commands = [
     )
 ].map(command => command.toJSON());
 
+
+/* =========================
+   DISCORD REST
+========================= */
+
 const rest = new REST({ version: "10" })
   .setToken(process.env.DISCORD_TOKEN);
 
 
-/* =====================================================
-   AKAKÇE'DEN HTML AL
-===================================================== */
+/* =========================
+   AKAKÇE SAYFASI
+========================= */
 
-async function getPage(url) {
+async function getAkakcePage(query) {
+
+  const url =
+    "https://www.akakce.com/arama/?q=" +
+    encodeURIComponent(query);
+
+  console.log("Akakçe:", query);
+
   const response = await fetch(url, {
     headers: {
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139 Safari/537.36",
-      "Accept-Language": "tr-TR,tr;q=0.9"
+      "Accept":
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      "Accept-Language":
+        "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
     }
   });
 
   if (!response.ok) {
-    throw new Error(`Akakçe HTTP ${response.status}`);
+    throw new Error(
+      `Akakçe HTTP ${response.status}`
+    );
   }
 
   return await response.text();
 }
 
 
-/* =====================================================
-   TL FİYATI TEMİZLE
-===================================================== */
+/* =========================
+   FİYAT PARSE
+========================= */
 
-function parsePrice(text) {
+function parseTurkishPrice(text) {
+
   if (!text) return null;
 
   const match = text.match(
-    /(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*TL/i
+    /(?:En Ucuz|en ucuz)\s*([\d.]+(?:,\d{1,2})?)\s*TL/i
   );
 
   if (!match) return null;
@@ -105,251 +130,355 @@ function parsePrice(text) {
 }
 
 
-/* =====================================================
-   AKAKÇE ARAMA
-===================================================== */
+/* =========================
+   AKAKÇE ÜRÜN ARAMA
+========================= */
 
 async function searchAkakce(query) {
-  console.log(`Akakçe aranıyor: ${query}`);
 
-  const searchUrl =
-    "https://www.akakce.com/arama/?q=" +
-    encodeURIComponent(query);
-
-  const html = await getPage(searchUrl);
+  const html =
+    await getAkakcePage(query);
 
   const $ = cheerio.load(html);
 
   const products = [];
+
   const seen = new Set();
 
-  $("a[href]").each((index, element) => {
-    const href = $(element).attr("href");
+
+  /*
+    Akakçe arama sonuçlarındaki
+    ürün bağlantılarını buluyoruz.
+  */
+
+  $("a").each((i, el) => {
+
+    const href =
+      $(el).attr("href");
 
     if (!href) return;
+
 
     let url = href;
 
     if (url.startsWith("/")) {
-      url = "https://www.akakce.com" + url;
+      url =
+        "https://www.akakce.com" +
+        url;
     }
 
-    if (!url.startsWith("https://www.akakce.com")) {
+
+    if (
+      !url.startsWith(
+        "https://www.akakce.com/"
+      )
+    ) {
       return;
     }
 
-    const text = $(element)
-      .text()
-      .replace(/\s+/g, " ")
-      .trim();
+
+    const text =
+      $(el)
+        .text()
+        .replace(/\s+/g, " ")
+        .trim();
+
 
     if (!text) return;
 
-    const price = parsePrice(text);
+
+    /*
+      Ürün sonucu genellikle
+      "En Ucuz ... TL"
+      metnini içeriyor.
+    */
+
+    const price =
+      parseTurkishPrice(text);
+
 
     if (!price) return;
+
+
+    /*
+      Arama sonucunda ürün sayfası
+      olmayan bağlantıları ele.
+    */
+
+    if (
+      !url.includes(
+        "/islemci/"
+      ) &&
+      !url.includes(
+        "/ekran-karti/"
+      ) &&
+      !url.includes(
+        "/ram/"
+      ) &&
+      !url.includes(
+        "/ssd/"
+      ) &&
+      !url.includes(
+        "/anakart/"
+      ) &&
+      !url.includes(
+        "/power-supply/"
+      ) &&
+      !url.includes(
+        "/kasa/"
+      ) &&
+      !url.includes(
+        "/oyun-bilgisayari/"
+      )
+    ) {
+      return;
+    }
+
 
     if (seen.has(url)) return;
 
     seen.add(url);
 
+
+    /*
+      "En Ucuz..." kısmını ürün
+      isminden temizle.
+    */
+
+    let name =
+      text
+        .replace(
+          /En Ucuz.*$/i,
+          ""
+        )
+        .trim();
+
+
+    if (
+      name.length < 5
+    ) {
+      name = query;
+    }
+
+
     products.push({
-      name: text.substring(0, 150),
+      name,
       price,
       url
     });
+
   });
 
+
   /*
-    Arama sonuçlarında fiyat bağlantının içinde değilse,
-    yakınındaki metinden de fiyat bulmayı deniyoruz.
+    En ucuzdan pahalıya sırala.
   */
 
-  if (products.length === 0) {
-    $("body")
-      .find("*")
-      .each((index, element) => {
-        const text = $(element)
-          .text()
-          .replace(/\s+/g, " ")
-          .trim();
-
-        const price = parsePrice(text);
-
-        if (!price) return;
-
-        if (
-          text.length > 10 &&
-          text.length < 500
-        ) {
-          const links = $(element).find("a[href]");
-
-          if (links.length > 0) {
-            const link = links.first();
-
-            let href = link.attr("href");
-
-            if (!href) return;
-
-            if (href.startsWith("/")) {
-              href = "https://www.akakce.com" + href;
-            }
-
-            if (!href.includes("akakce.com")) {
-              return;
-            }
-
-            if (seen.has(href)) return;
-
-            seen.add(href);
-
-            products.push({
-              name: link.text().trim() || query,
-              price,
-              url: href
-            });
-          }
-        }
-      });
-  }
-
-  products.sort((a, b) => a.price - b.price);
-
-  console.log(
-    `${query}: ${products.length} sonuç bulundu`
+  products.sort(
+    (a, b) =>
+      a.price - b.price
   );
 
-  return products.slice(0, 5);
+
+  console.log(
+    `${query}: ${products.length} ürün`
+  );
+
+
+  return products.slice(0, 10);
 }
 
 
-/* =====================================================
+/* =========================
    ÜRÜN BUL
-===================================================== */
+========================= */
 
 async function findProduct(queries) {
-  for (const query of queries) {
-    try {
-      const results = await searchAkakce(query);
 
-      if (results.length > 0) {
+  for (const query of queries) {
+
+    try {
+
+      const results =
+        await searchAkakce(query);
+
+
+      if (results.length) {
+
         return results[0];
+
       }
+
     } catch (error) {
+
       console.error(
-        `Arama hatası (${query}):`,
+        query,
         error.message
       );
+
     }
+
   }
 
   return null;
 }
 
 
-/* =====================================================
-   PARA
-===================================================== */
+/* =========================
+   PARA FORMAT
+========================= */
 
 function money(value) {
-  return `${Math.round(value).toLocaleString("tr-TR")} TL`;
+
+  return (
+    Math.round(value)
+      .toLocaleString("tr-TR") +
+    " TL"
+  );
+
 }
 
 
-/* =====================================================
-   PARÇA SEÇİMİ
-===================================================== */
+/* =========================
+   PARÇA SORGULARI
+========================= */
 
-function createQueries(budget, cpu, gpu) {
+function createQueries(
+  budget,
+  cpu,
+  gpu
+) {
 
   let cpuQueries;
   let gpuQueries;
 
+
+  /* CPU */
+
   if (cpu === "amd") {
+
     if (budget < 40000) {
+
       cpuQueries = [
         "Ryzen 5 5500",
         "Ryzen 5 5600"
       ];
+
     } else if (budget < 70000) {
+
       cpuQueries = [
         "Ryzen 5 7500F",
         "Ryzen 5 7600"
       ];
+
     } else {
+
       cpuQueries = [
         "Ryzen 7 7800X3D",
         "Ryzen 7 9800X3D"
       ];
+
     }
+
   } else {
+
     if (budget < 40000) {
+
       cpuQueries = [
         "Intel Core i3-12100F",
         "Intel Core i5-12400F"
       ];
+
     } else if (budget < 70000) {
+
       cpuQueries = [
         "Intel Core i5-14400F",
         "Intel Core i5-14600KF"
       ];
+
     } else {
+
       cpuQueries = [
         "Intel Core i7-14700F",
         "Intel Core Ultra 7"
       ];
+
     }
+
   }
 
 
+  /* GPU */
+
   if (gpu === "nvidia") {
+
     if (budget < 40000) {
+
       gpuQueries = [
         "RTX 3050",
         "RTX 4060"
       ];
+
     } else if (budget < 70000) {
+
       gpuQueries = [
         "RTX 4060",
         "RTX 4060 Ti"
       ];
+
     } else if (budget < 100000) {
+
       gpuQueries = [
         "RTX 5070",
         "RTX 4070 SUPER"
       ];
+
     } else {
+
       gpuQueries = [
         "RTX 5080",
         "RTX 5090"
       ];
+
     }
+
   } else {
+
     if (budget < 40000) {
+
       gpuQueries = [
         "RX 6600",
         "RX 7600"
       ];
+
     } else if (budget < 70000) {
+
       gpuQueries = [
         "RX 7600 XT",
         "RX 7700 XT"
       ];
+
     } else if (budget < 100000) {
+
       gpuQueries = [
         "RX 7800 XT",
         "RX 7900 GRE"
       ];
+
     } else {
+
       gpuQueries = [
         "RX 9070 XT",
         "RX 7900 XTX"
       ];
+
     }
+
   }
 
 
   return {
+
     cpu: cpuQueries,
 
     gpu: gpuQueries,
@@ -402,83 +531,92 @@ function createQueries(budget, cpu, gpu) {
       "Mesh ATX kasa",
       "Airflow ATX kasa"
     ]
+
   };
+
 }
 
 
-/* =====================================================
-   BOT HAZIR
-===================================================== */
+/* =========================
+   BOT READY
+========================= */
 
-client.once("ready", async () => {
-
-  console.log(
-    `Bot aktif: ${client.user.tag}`
-  );
-
-  try {
-
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      {
-        body: commands
-      }
-    );
+client.once(
+  "ready",
+  async () => {
 
     console.log(
-      "Slash komutları kaydedildi!"
+      `Bot aktif: ${client.user.tag}`
     );
 
-  } catch (error) {
 
-    console.error(
-      "Komut kayıt hatası:",
-      error
-    );
+    try {
+
+      await rest.put(
+        Routes.applicationCommands(
+          client.user.id
+        ),
+        {
+          body: commands
+        }
+      );
+
+
+      console.log(
+        "Slash komutları kaydedildi!"
+      );
+
+    } catch (error) {
+
+      console.error(
+        "Slash komut hatası:",
+        error
+      );
+
+    }
 
   }
+);
 
-});
 
-
-/* =====================================================
-   DISCORD KOMUTU
-===================================================== */
+/* =========================
+   KOMUT
+========================= */
 
 client.on(
   "interactionCreate",
   async interaction => {
 
-    if (!interaction.isChatInputCommand()) {
+    if (
+      !interaction.isChatInputCommand()
+    ) {
       return;
     }
 
+
     if (
-      interaction.commandName !== "pc-topla"
+      interaction.commandName !==
+      "pc-topla"
     ) {
       return;
     }
 
 
     const budget =
-      interaction.options.getInteger(
-        "butce"
-      );
+      interaction.options
+        .getInteger("butce");
 
     const usage =
-      interaction.options.getString(
-        "kullanim"
-      );
+      interaction.options
+        .getString("kullanim");
 
     const cpu =
-      interaction.options.getString(
-        "cpu"
-      );
+      interaction.options
+        .getString("cpu");
 
     const gpu =
-      interaction.options.getString(
-        "gpu"
-      );
+      interaction.options
+        .getString("gpu");
 
 
     await interaction.deferReply();
@@ -487,7 +625,10 @@ client.on(
     try {
 
       console.log(
-        `Yeni PC isteği: ${budget} TL`
+        "PC oluşturuluyor:",
+        budget,
+        cpu,
+        gpu
       );
 
 
@@ -500,9 +641,9 @@ client.on(
 
 
       /*
-        Parçaları sırayla arıyoruz.
-        Böylece Akakçe'ye aynı anda çok
-        fazla istek göndermiyoruz.
+        Sırayla arıyoruz.
+        Böylece Akakçe'ye aynı anda
+        7 istek göndermiyoruz.
       */
 
       const cpuProduct =
@@ -542,60 +683,71 @@ client.on(
 
 
       const parts = [
+
         {
           name: "🧠 İşlemci",
           product: cpuProduct
         },
+
         {
           name: "🎮 Ekran Kartı",
           product: gpuProduct
         },
+
         {
           name: "🧩 RAM",
           product: ramProduct
         },
+
         {
           name: "💾 SSD",
           product: ssdProduct
         },
+
         {
           name: "🔧 Anakart",
           product: motherboardProduct
         },
+
         {
           name: "⚡ PSU",
           product: psuProduct
         },
+
         {
           name: "📦 Kasa",
           product: caseProduct
         }
+
       ];
 
 
       const missing =
         parts.filter(
-          part => !part.product
+          x => !x.product
         );
 
 
-      if (missing.length > 0) {
+      if (missing.length) {
 
         await interaction.editReply(
-          "❌ Akakçe'den şu parçalar bulunamadı:\n\n" +
+          "❌ Akakçe'de ürün bulunamadı:\n\n" +
           missing
-            .map(part => part.name)
+            .map(x => x.name)
             .join("\n")
         );
 
         return;
+
       }
 
 
       let total = 0;
 
 
-      for (const part of parts) {
+      for (
+        const part of parts
+      ) {
 
         total +=
           part.product.price;
@@ -603,24 +755,39 @@ client.on(
       }
 
 
+      /* =========================
+         EMBED
+      ========================= */
+
       const embed =
         new EmbedBuilder()
+
           .setTitle(
             "🖥️ PC Builder Bot"
           )
+
           .setDescription(
-            "🌐 **Akakçe'den canlı fiyat kontrolü**\n\n" +
-            `💰 **Bütçe:** ${money(budget)}\n` +
+            "🌐 **Akakçe canlı fiyatları**\n\n" +
+
+            `💰 **Bütçe:** ${money(
+              budget
+            )}\n` +
+
             `🎯 **Kullanım:** ${usage}\n` +
-            `🧠 **CPU:** ${cpu.toUpperCase()}\n` +
-            `🎮 **GPU:** ${gpu.toUpperCase()}`
+
+            `🧠 **CPU tercihi:** ${cpu.toUpperCase()}\n` +
+
+            `🎮 **GPU tercihi:** ${gpu.toUpperCase()}`
           );
 
 
-      for (const part of parts) {
+      for (
+        const part of parts
+      ) {
 
         const product =
           part.product;
+
 
         embed.addFields({
 
@@ -628,9 +795,16 @@ client.on(
             part.name,
 
           value:
+
             `**${product.name}**\n` +
-            `💰 **${money(product.price)}**\n` +
-            `🔗 [Akakçe'de görüntüle](${product.url})`,
+
+            `💰 **${money(
+              product.price
+            )}**\n` +
+
+            `🔗 [Akakçe'de aç](${
+              product.url
+            })`,
 
           inline: false
 
@@ -644,12 +818,16 @@ client.on(
         name: "💰 TOPLAM",
 
         value:
+
           `**${money(total)}**\n\n` +
+
           (
             total <= budget
+
               ? `✅ Bütçenin **${money(
                   budget - total
                 )}** altında.`
+
               : `⚠️ Bütçeyi **${money(
                   total - budget
                 )}** aşıyor.`
@@ -663,7 +841,7 @@ client.on(
       embed.setFooter({
 
         text:
-          "Akakçe canlı fiyat kontrolü • PC Builder Bot"
+          "Akakçe fiyatları • PC Builder Bot"
 
       });
 
@@ -686,8 +864,10 @@ client.on(
 
 
       await interaction.editReply(
-        "❌ Akakçe'ye bağlanırken hata oluştu.\n\n" +
-        "Console'daki hata mesajını kontrol et."
+
+        "❌ Akakçe'ye bağlanırken hata oluştu.\n" +
+        "Railway Console'daki hatayı kontrol et."
+
       );
 
     }
@@ -695,6 +875,10 @@ client.on(
   }
 );
 
+
+/* =========================
+   LOGIN
+========================= */
 
 client.login(
   process.env.DISCORD_TOKEN
