@@ -14,6 +14,12 @@ const GPULAR = ['NVIDIA', 'AMD'];
 
 client.once('ready', () => {
   console.log(`✅ Bot giriş yaptı: ${client.user.tag}`);
+  
+  // Slash command'ı kaydet
+  client.application.commands.create({
+    name: 'pctopla',
+    description: 'Discord PC Toplama Botu',
+  }).catch(err => console.error('Komut kayıt hatası:', err));
 });
 
 client.on('interactionCreate', async (interaction) => {
@@ -238,7 +244,7 @@ async function buildPCWithGemini(session) {
     const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
     const prompt = `
-Sen bir PC mimarısın. Aşağıdaki kriterlere göre Türkiye'deki güncel fiyatlar kullanarak bir PC sistemi tasarla.
+GÖREV: Türkiye'deki güncel fiyatları araştırarak oyun sistemi önerir.
 
 KRITER:
 - Bütçe: ${session.budget} TL
@@ -247,22 +253,23 @@ KRITER:
 - GPU Markası: ${session.gpu}
 
 GÖREVLERİN:
-1. Türkiye'deki güncel fiyatları internetten araştır (Akakçe, Hepsiburada, Trendyol, Vatan Bilgisayar, İtopya, Sinerji, Teknosa vb.)
-2. Uyumlu parçalar seç
-3. Bütçeyi ASLA aşma
-4. Oyuna göre optimize et
-5. Gerçek model isimlerini ve fiyatlarını kullan
+1. İnternetten Türkiye'deki güncel ürün fiyatlarını ara
+2. Akakçe, Hepsiburada, Trendyol, Vatan Bilgisayar, İtopya, Teknosa vb. mağazalardan fiyat bul
+3. Uyumlu parçalar seç
+4. Bütçeyi ASLA aşma
+5. Oyuna göre optimize et
+6. Gerçek model isimlerini ve güncel fiyatlarını kullan
 
 PARÇALAR:
 - CPU (Intel veya AMD - tercihine göre)
 - GPU (NVIDIA veya AMD - tercihine göre)
-- RAM (DDR5 tercih, 16-32GB)
+- RAM (DDR5, 16-32GB)
 - SSD (1TB+ NVMe)
-- Anakart (B serisi veya H serisi, uyumlu)
+- Anakart (B/H serisi, uyumlu soket)
 - PSU (Güvenilir, GPU için yeterli)
-- Kasa (Güvenilir, ATX uyumlu)
+- Kasa (ATX uyumlu)
 
-ÖNEMLİ KURALAR:
+KURALAR:
 - Wraith soğutucusu KULLANMA
 - Monitor, klavye, mouse, kulaklık EKLEME
 - CPU soketi ↔ Anakart uyumlu olmalı
@@ -270,66 +277,68 @@ PARÇALAR:
 - PSU GPU için yeterli olmalı
 - Bütçeyi KESINLIKLE AŞMA
 
-ÇIKTI FORMATI (JSON):
+ÇIKTI FORMATI (SADECE JSON, BAŞKA YAZMA):
 {
   "cpu": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "Ryzen 5 7500F",
+    "price": 12999,
+    "store": "Akakçe",
+    "url": "https://example.com"
   },
   "gpu": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "RTX 4060 8GB",
+    "price": 15499,
+    "store": "Hepsiburada",
+    "url": "https://example.com"
   },
   "ram": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "Kingston FURY 32GB DDR5 6000MHz",
+    "price": 8999,
+    "store": "Trendyol",
+    "url": "https://example.com"
   },
   "ssd": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "WD Black SN850X 1TB",
+    "price": 6999,
+    "store": "Vatan Bilgisayar",
+    "url": "https://example.com"
   },
   "motherboard": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "MSI B650M MORTAR WIFI",
+    "price": 9499,
+    "store": "İtopya",
+    "url": "https://example.com"
   },
   "psu": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "Corsair 750W 80+ Gold",
+    "price": 5999,
+    "store": "Teknosa",
+    "url": "https://example.com"
   },
   "case": {
-    "model": "...",
-    "price": 0,
-    "store": "...",
-    "url": "..."
+    "model": "Corsair Spec-Delta RGB",
+    "price": 3999,
+    "store": "Akakçe",
+    "url": "https://example.com"
   },
-  "total": 0,
-  "remaining": 0,
-  "performance_note": "..."
+  "total": 64494,
+  "remaining": ${session.budget - 64494},
+  "performance_note": "Bu sistem ${session.game} için yüksek performans sunar."
 }
-
-Sadece JSON döndür, başka yazı yazma.
 `;
 
     const result = await model.generateContent({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      systemInstruction: 'Web araması yap ve Türkiye\'deki güncel ürün fiyatlarını bul. Gerçek, güncel ve doğru fiyatlar ver.'
+      tools: [
+        {
+          googleSearch: {}
+        }
+      ]
     });
 
     const responseText = result.response.text();
     
-    // JSON'u çıkar
+    // JSON'u çıkat
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error('Gemini Response:', responseText);
@@ -340,14 +349,18 @@ Sadece JSON döndür, başka yazı yazma.
 
     // Bütçe kontrolü
     if (pcConfig.total > session.budget) {
-      return { error: `❌ Yapılandırılan sistem bütçeyi aşıyor (${pcConfig.total} TL > ${session.budget} TL). Daha ucuz bir sistem oluşturamazsanız, daha yüksek bir bütçe seçin.` };
+      return { 
+        error: `❌ Yapılandırılan sistem bütçeyi aşıyor (${pcConfig.total.toLocaleString('tr-TR')} TL > ${session.budget.toLocaleString('tr-TR')} TL). Daha yüksek bir bütçe seçin.` 
+      };
     }
 
     return pcConfig;
 
   } catch (error) {
-    console.error('Gemini Error:', error.message);
-    return { error: 'Gemini API hatası: ' + error.message };
+    console.error('Gemini Error:', error);
+    return { 
+      error: 'Gemini API hatası. Lütfen API key\'ini kontrol et ve tekrar dene.\n\nHata: ' + error.message 
+    };
   }
 }
 
@@ -364,49 +377,49 @@ function createPCEmbed(config, session) {
   // CPU
   embed.addFields({
     name: '🧠 İşlemci',
-    value: `**${config.cpu.model}**\n${config.cpu.price.toLocaleString('tr-TR')} TL\n🏪 ${config.cpu.store}\n[Ürüne Git](${config.cpu.url})`,
+    value: `**${config.cpu.model}**\n${config.cpu.price.toLocaleString('tr-TR')} TL\n🏪 ${config.cpu.store}`,
     inline: false
   });
 
   // GPU
   embed.addFields({
     name: '🎮 Ekran Kartı',
-    value: `**${config.gpu.model}**\n${config.gpu.price.toLocaleString('tr-TR')} TL\n🏪 ${config.gpu.store}\n[Ürüne Git](${config.gpu.url})`,
+    value: `**${config.gpu.model}**\n${config.gpu.price.toLocaleString('tr-TR')} TL\n🏪 ${config.gpu.store}`,
     inline: false
   });
 
   // RAM
   embed.addFields({
     name: '🧩 RAM',
-    value: `**${config.ram.model}**\n${config.ram.price.toLocaleString('tr-TR')} TL\n🏪 ${config.ram.store}\n[Ürüne Git](${config.ram.url})`,
+    value: `**${config.ram.model}**\n${config.ram.price.toLocaleString('tr-TR')} TL\n🏪 ${config.ram.store}`,
     inline: false
   });
 
   // SSD
   embed.addFields({
     name: '💾 SSD',
-    value: `**${config.ssd.model}**\n${config.ssd.price.toLocaleString('tr-TR')} TL\n🏪 ${config.ssd.store}\n[Ürüne Git](${config.ssd.url})`,
+    value: `**${config.ssd.model}**\n${config.ssd.price.toLocaleString('tr-TR')} TL\n🏪 ${config.ssd.store}`,
     inline: false
   });
 
   // Anakart
   embed.addFields({
     name: '🔧 Anakart',
-    value: `**${config.motherboard.model}**\n${config.motherboard.price.toLocaleString('tr-TR')} TL\n🏪 ${config.motherboard.store}\n[Ürüne Git](${config.motherboard.url})`,
+    value: `**${config.motherboard.model}**\n${config.motherboard.price.toLocaleString('tr-TR')} TL\n🏪 ${config.motherboard.store}`,
     inline: false
   });
 
   // PSU
   embed.addFields({
     name: '⚡ Güç Kaynağı',
-    value: `**${config.psu.model}**\n${config.psu.price.toLocaleString('tr-TR')} TL\n🏪 ${config.psu.store}\n[Ürüne Git](${config.psu.url})`,
+    value: `**${config.psu.model}**\n${config.psu.price.toLocaleString('tr-TR')} TL\n🏪 ${config.psu.store}`,
     inline: false
   });
 
   // Kasa
   embed.addFields({
     name: '📦 Kasa',
-    value: `**${config.case.model}**\n${config.case.price.toLocaleString('tr-TR')} TL\n🏪 ${config.case.store}\n[Ürüne Git](${config.case.url})`,
+    value: `**${config.case.model}**\n${config.case.price.toLocaleString('tr-TR')} TL\n🏪 ${config.case.store}`,
     inline: false
   });
 
@@ -432,18 +445,5 @@ function createPCEmbed(config, session) {
 
   return embed;
 }
-
-// Slash command'ı kaydet
-client.on('ready', async () => {
-  try {
-    await client.application.commands.create({
-      name: 'pctopla',
-      description: 'Discord PC Toplama Botu',
-    });
-    console.log('✅ /pctopla komutu oluşturuldu');
-  } catch (error) {
-    console.error('Komut kayıt hatası:', error);
-  }
-});
 
 client.login(process.env.DISCORD_TOKEN);
