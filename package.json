@@ -6,7 +6,6 @@
     "start": "node discord-bot.js"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
     "discord.js": "^14.24.2"
   }
 }
