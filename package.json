@@ -1,12 +1,12 @@
 {
-  "name": "pc-topla-bot",
+  "name": "pc-builder-bot",
   "version": "1.0.0",
   "main": "discord-bot.js",
   "scripts": {
     "start": "node discord-bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.27.0",
-    "cheerio": "^1.1.2"
+    "@google/genai": "latest",
+    "discord.js": "latest"
   }
 }
