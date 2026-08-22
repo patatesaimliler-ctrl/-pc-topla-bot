@@ -1,17 +1,11 @@
 {
-  "name": "discord-pc-toplama-botu",
+  "name": "pc-builder-bot",
   "version": "1.0.0",
-  "description": "Discord PC Toplama Botu - Reef API ile Fiyat Çekme",
   "main": "discord-bot.js",
   "scripts": {
     "start": "node discord-bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.0",
-    "axios": "^1.6.0",
-    "dotenv": "^16.3.1"
-  },
-  "engines": {
-    "node": "18.x"
+    "discord.js": "^14.24.2"
   }
 }
