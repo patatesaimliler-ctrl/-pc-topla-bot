@@ -7,6 +7,8 @@ const {
   EmbedBuilder
 } = require("discord.js");
 
+const cheerio = require("cheerio");
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
@@ -14,30 +16,31 @@ const client = new Client({
 const commands = [
   new SlashCommandBuilder()
     .setName("pc-topla")
-    .setDescription("Akakçe güncel fiyatlarıyla PC önerir.")
+    .setDescription("Akakçe güncel fiyatlarıyla PC toplar.")
     .addIntegerOption(option =>
       option
         .setName("butce")
-        .setDescription("Bütçen TL olarak")
+        .setDescription("Bütçen TL")
         .setRequired(true)
-        .setMinValue(10000)
+        .setMinValue(15000)
         .setMaxValue(500000)
     )
     .addStringOption(option =>
       option
         .setName("kullanim")
-        .setDescription("PC kullanım amacı")
+        .setDescription("Kullanım amacı")
         .setRequired(true)
         .addChoices(
-          { name: "Oyun", value: "oyun" },
-          { name: "Yayın", value: "yayin" },
-          { name: "İş", value: "is" }
+          { name: "🎮 Oyun", value: "oyun" },
+          { name: "📺 Yayın", value: "yayin" },
+          { name: "🎮📺 Oyun + Yayın", value: "oyun-yayin" },
+          { name: "💼 İş", value: "is" }
         )
     )
     .addStringOption(option =>
       option
         .setName("cpu")
-        .setDescription("İşlemci tercihi")
+        .setDescription("İşlemci markası")
         .setRequired(true)
         .addChoices(
           { name: "AMD", value: "amd" },
@@ -47,7 +50,7 @@ const commands = [
     .addStringOption(option =>
       option
         .setName("gpu")
-        .setDescription("Ekran kartı tercihi")
+        .setDescription("Ekran kartı markası")
         .setRequired(true)
         .addChoices(
           { name: "NVIDIA", value: "nvidia" },
@@ -59,277 +62,640 @@ const commands = [
 const rest = new REST({ version: "10" })
   .setToken(process.env.DISCORD_TOKEN);
 
-/* =========================
-   AKAKÇE
-========================= */
 
-async function akakceSearch(searchQuery) {
-  const token = process.env.APIFY_TOKEN;
+/* =====================================================
+   AKAKÇE'DEN HTML AL
+===================================================== */
 
-  if (!token) {
-    throw new Error("APIFY_TOKEN bulunamadı!");
-  }
-
-  const response = await fetch(
-    `https://api.apify.com/v2/acts/studio-amba~akakce-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(token)}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        searchQuery,
-        maxResults: 5,
-        includeOffers: false,
-        proxyConfiguration: {
-          useApifyProxy: true,
-          apifyProxyGroups: ["RESIDENTIAL"],
-          apifyProxyCountry: "TR"
-        }
-      })
+async function getPage(url) {
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/139 Safari/537.36",
+      "Accept-Language": "tr-TR,tr;q=0.9"
     }
-  );
+  });
 
   if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Akakçe/Apify hatası: ${response.status} ${text}`);
+    throw new Error(`Akakçe HTTP ${response.status}`);
   }
 
-  const data = await response.json();
+  return await response.text();
+}
 
-  if (!Array.isArray(data)) {
-    throw new Error("Akakçe beklenmeyen veri döndürdü.");
+
+/* =====================================================
+   TL FİYATI TEMİZLE
+===================================================== */
+
+function parsePrice(text) {
+  if (!text) return null;
+
+  const match = text.match(
+    /(\d{1,3}(?:\.\d{3})*(?:,\d{2})?)\s*TL/i
+  );
+
+  if (!match) return null;
+
+  return Number(
+    match[1]
+      .replace(/\./g, "")
+      .replace(",", ".")
+  );
+}
+
+
+/* =====================================================
+   AKAKÇE ARAMA
+===================================================== */
+
+async function searchAkakce(query) {
+  console.log(`Akakçe aranıyor: ${query}`);
+
+  const searchUrl =
+    "https://www.akakce.com/arama/?q=" +
+    encodeURIComponent(query);
+
+  const html = await getPage(searchUrl);
+
+  const $ = cheerio.load(html);
+
+  const products = [];
+  const seen = new Set();
+
+  $("a[href]").each((index, element) => {
+    const href = $(element).attr("href");
+
+    if (!href) return;
+
+    let url = href;
+
+    if (url.startsWith("/")) {
+      url = "https://www.akakce.com" + url;
+    }
+
+    if (!url.startsWith("https://www.akakce.com")) {
+      return;
+    }
+
+    const text = $(element)
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!text) return;
+
+    const price = parsePrice(text);
+
+    if (!price) return;
+
+    if (seen.has(url)) return;
+
+    seen.add(url);
+
+    products.push({
+      name: text.substring(0, 150),
+      price,
+      url
+    });
+  });
+
+  /*
+    Arama sonuçlarında fiyat bağlantının içinde değilse,
+    yakınındaki metinden de fiyat bulmayı deniyoruz.
+  */
+
+  if (products.length === 0) {
+    $("body")
+      .find("*")
+      .each((index, element) => {
+        const text = $(element)
+          .text()
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const price = parsePrice(text);
+
+        if (!price) return;
+
+        if (
+          text.length > 10 &&
+          text.length < 500
+        ) {
+          const links = $(element).find("a[href]");
+
+          if (links.length > 0) {
+            const link = links.first();
+
+            let href = link.attr("href");
+
+            if (!href) return;
+
+            if (href.startsWith("/")) {
+              href = "https://www.akakce.com" + href;
+            }
+
+            if (!href.includes("akakce.com")) {
+              return;
+            }
+
+            if (seen.has(href)) return;
+
+            seen.add(href);
+
+            products.push({
+              name: link.text().trim() || query,
+              price,
+              url: href
+            });
+          }
+        }
+      });
   }
 
-  return data
-    .filter(item =>
-      item &&
-      typeof item.lowestPrice === "number" &&
-      item.lowestPrice > 0 &&
-      item.productName
-    )
-    .sort((a, b) => a.lowestPrice - b.lowestPrice);
+  products.sort((a, b) => a.price - b.price);
+
+  console.log(
+    `${query}: ${products.length} sonuç bulundu`
+  );
+
+  return products.slice(0, 5);
 }
 
-async function findProduct(searchQuery) {
-  const results = await akakceSearch(searchQuery);
 
-  if (!results.length) {
-    return null;
+/* =====================================================
+   ÜRÜN BUL
+===================================================== */
+
+async function findProduct(queries) {
+  for (const query of queries) {
+    try {
+      const results = await searchAkakce(query);
+
+      if (results.length > 0) {
+        return results[0];
+      }
+    } catch (error) {
+      console.error(
+        `Arama hatası (${query}):`,
+        error.message
+      );
+    }
   }
 
-  return results[0];
+  return null;
 }
 
-function money(price) {
-  return `${Math.round(price).toLocaleString("tr-TR")} TL`;
+
+/* =====================================================
+   PARA
+===================================================== */
+
+function money(value) {
+  return `${Math.round(value).toLocaleString("tr-TR")} TL`;
 }
 
-/* =========================
-   PC PARÇA ARAMALARI
-========================= */
 
-function createPartQueries(butce, cpu, gpu) {
+/* =====================================================
+   PARÇA SEÇİMİ
+===================================================== */
+
+function createQueries(budget, cpu, gpu) {
+
   let cpuQueries;
   let gpuQueries;
 
   if (cpu === "amd") {
-    if (butce < 40000) {
-      cpuQueries = ["Ryzen 5 5500", "Ryzen 5 5600"];
-    } else if (butce < 70000) {
-      cpuQueries = ["Ryzen 5 7500F", "Ryzen 5 7600"];
+    if (budget < 40000) {
+      cpuQueries = [
+        "Ryzen 5 5500",
+        "Ryzen 5 5600"
+      ];
+    } else if (budget < 70000) {
+      cpuQueries = [
+        "Ryzen 5 7500F",
+        "Ryzen 5 7600"
+      ];
     } else {
-      cpuQueries = ["Ryzen 7 7800X3D", "Ryzen 7 9800X3D"];
+      cpuQueries = [
+        "Ryzen 7 7800X3D",
+        "Ryzen 7 9800X3D"
+      ];
     }
   } else {
-    if (butce < 40000) {
-      cpuQueries = ["Intel Core i3-12100F", "Intel Core i5-12400F"];
-    } else if (butce < 70000) {
-      cpuQueries = ["Intel Core i5-14400F", "Intel Core i5-14600KF"];
+    if (budget < 40000) {
+      cpuQueries = [
+        "Intel Core i3-12100F",
+        "Intel Core i5-12400F"
+      ];
+    } else if (budget < 70000) {
+      cpuQueries = [
+        "Intel Core i5-14400F",
+        "Intel Core i5-14600KF"
+      ];
     } else {
-      cpuQueries = ["Intel Core i7-14700F", "Intel Core Ultra 7"];
+      cpuQueries = [
+        "Intel Core i7-14700F",
+        "Intel Core Ultra 7"
+      ];
     }
   }
+
 
   if (gpu === "nvidia") {
-    if (butce < 40000) {
-      gpuQueries = ["RTX 3050", "RTX 4060"];
-    } else if (butce < 70000) {
-      gpuQueries = ["RTX 4060", "RTX 4060 Ti"];
-    } else if (butce < 100000) {
-      gpuQueries = ["RTX 4070 SUPER", "RTX 5070"];
+    if (budget < 40000) {
+      gpuQueries = [
+        "RTX 3050",
+        "RTX 4060"
+      ];
+    } else if (budget < 70000) {
+      gpuQueries = [
+        "RTX 4060",
+        "RTX 4060 Ti"
+      ];
+    } else if (budget < 100000) {
+      gpuQueries = [
+        "RTX 5070",
+        "RTX 4070 SUPER"
+      ];
     } else {
-      gpuQueries = ["RTX 5080", "RTX 5090"];
+      gpuQueries = [
+        "RTX 5080",
+        "RTX 5090"
+      ];
     }
   } else {
-    if (butce < 40000) {
-      gpuQueries = ["RX 6600", "RX 7600"];
-    } else if (butce < 70000) {
-      gpuQueries = ["RX 7600 XT", "RX 7700 XT"];
-    } else if (butce < 100000) {
-      gpuQueries = ["RX 7800 XT", "RX 7900 GRE"];
+    if (budget < 40000) {
+      gpuQueries = [
+        "RX 6600",
+        "RX 7600"
+      ];
+    } else if (budget < 70000) {
+      gpuQueries = [
+        "RX 7600 XT",
+        "RX 7700 XT"
+      ];
+    } else if (budget < 100000) {
+      gpuQueries = [
+        "RX 7800 XT",
+        "RX 7900 GRE"
+      ];
     } else {
-      gpuQueries = ["RX 9070 XT", "RX 7900 XTX"];
+      gpuQueries = [
+        "RX 9070 XT",
+        "RX 7900 XTX"
+      ];
     }
   }
 
+
   return {
-    cpuQueries,
-    gpuQueries,
-    ramQueries: butce < 50000
-      ? ["16GB DDR4 RAM 3200", "16GB DDR5 RAM"]
-      : ["32GB DDR5 RAM", "32GB DDR5 6000"],
-    ssdQueries: butce < 50000
-      ? ["500GB NVMe SSD", "1TB NVMe SSD"]
-      : ["1TB NVMe SSD", "2TB NVMe SSD"],
-    motherboardQueries:
+    cpu: cpuQueries,
+
+    gpu: gpuQueries,
+
+    ram:
+      budget < 50000
+        ? [
+            "16GB DDR4 RAM",
+            "16GB DDR5 RAM"
+          ]
+        : [
+            "32GB DDR5 RAM",
+            "32GB DDR5 6000"
+          ],
+
+    ssd:
+      budget < 50000
+        ? [
+            "500GB NVMe SSD",
+            "1TB NVMe SSD"
+          ]
+        : [
+            "1TB NVMe SSD",
+            "2TB NVMe SSD"
+          ],
+
+    motherboard:
       cpu === "amd"
-        ? ["B550 anakart", "B650 anakart"]
-        : ["B660 anakart", "B760 anakart"],
-    psuQueries:
-      butce < 50000
-        ? ["550W 80 Plus Bronze PSU", "650W 80 Plus Bronze PSU"]
-        : ["650W 80 Plus Gold PSU", "750W 80 Plus Gold PSU"],
-    caseQueries:
-      ["Mesh ATX kasa", "Airflow ATX kasa"]
+        ? [
+            "B550 anakart",
+            "B650 anakart"
+          ]
+        : [
+            "B660 anakart",
+            "B760 anakart"
+          ],
+
+    psu:
+      budget < 50000
+        ? [
+            "550W 80 Plus Bronze PSU",
+            "650W 80 Plus Bronze PSU"
+          ]
+        : [
+            "650W 80 Plus Gold PSU",
+            "750W 80 Plus Gold PSU"
+          ],
+
+    case: [
+      "Mesh ATX kasa",
+      "Airflow ATX kasa"
+    ]
   };
 }
 
-/* =========================
-   BOT READY
-========================= */
+
+/* =====================================================
+   BOT HAZIR
+===================================================== */
 
 client.once("ready", async () => {
-  console.log(`Bot aktif: ${client.user.tag}`);
+
+  console.log(
+    `Bot aktif: ${client.user.tag}`
+  );
 
   try {
+
     await rest.put(
       Routes.applicationCommands(client.user.id),
-      { body: commands }
+      {
+        body: commands
+      }
     );
 
-    console.log("Slash komutları kaydedildi!");
+    console.log(
+      "Slash komutları kaydedildi!"
+    );
+
   } catch (error) {
-    console.error("Slash komut hatası:", error);
+
+    console.error(
+      "Komut kayıt hatası:",
+      error
+    );
+
   }
+
 });
 
-/* =========================
-   KOMUT
-========================= */
 
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName !== "pc-topla") return;
+/* =====================================================
+   DISCORD KOMUTU
+===================================================== */
 
-  const butce = interaction.options.getInteger("butce");
-  const kullanim = interaction.options.getString("kullanim");
-  const cpu = interaction.options.getString("cpu");
-  const gpu = interaction.options.getString("gpu");
+client.on(
+  "interactionCreate",
+  async interaction => {
 
-  await interaction.deferReply();
-
-  try {
-    const queries = createPartQueries(butce, cpu, gpu);
-
-    /*
-      Aynı anda arıyoruz.
-      Böylece 7 ayrı Akakçe isteği sırayla beklemiyor.
-    */
-
-    const [
-      cpuResult,
-      gpuResult,
-      ramResult,
-      ssdResult,
-      motherboardResult,
-      psuResult,
-      caseResult
-    ] = await Promise.all([
-      findProduct(queries.cpuQueries[0]),
-      findProduct(queries.gpuQueries[0]),
-      findProduct(queries.ramQueries[0]),
-      findProduct(queries.ssdQueries[0]),
-      findProduct(queries.motherboardQueries[0]),
-      findProduct(queries.psuQueries[0]),
-      findProduct(queries.caseQueries[0])
-    ]);
-
-    const parts = [
-      { name: "🧠 İşlemci", product: cpuResult },
-      { name: "🎮 Ekran Kartı", product: gpuResult },
-      { name: "🧩 RAM", product: ramResult },
-      { name: "💾 SSD", product: ssdResult },
-      { name: "🔧 Anakart", product: motherboardResult },
-      { name: "⚡ PSU", product: psuResult },
-      { name: "📦 Kasa", product: caseResult }
-    ];
-
-    const missing = parts.filter(x => !x.product);
-
-    if (missing.length > 0) {
-      await interaction.editReply(
-        `❌ Akakçe'den şu parçaları bulamadım: ${missing
-          .map(x => x.name)
-          .join(", ")}`
-      );
+    if (!interaction.isChatInputCommand()) {
       return;
     }
 
-    let total = 0;
-
-    for (const part of parts) {
-      total += part.product.lowestPrice;
+    if (
+      interaction.commandName !== "pc-topla"
+    ) {
+      return;
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle("🖥️ PC Builder Bot")
-      .setDescription(
-        `💰 **Bütçe:** ${money(butce)}\n` +
-        `🎯 **Kullanım:** ${kullanim}\n` +
-        `🧠 **CPU tercihi:** ${cpu.toUpperCase()}\n` +
-        `🎮 **GPU tercihi:** ${gpu.toUpperCase()}\n\n` +
-        `📊 **Akakçe'den güncel fiyatlarla hesaplandı.**`
+
+    const budget =
+      interaction.options.getInteger(
+        "butce"
       );
 
-    for (const part of parts) {
-      const p = part.product;
+    const usage =
+      interaction.options.getString(
+        "kullanim"
+      );
+
+    const cpu =
+      interaction.options.getString(
+        "cpu"
+      );
+
+    const gpu =
+      interaction.options.getString(
+        "gpu"
+      );
+
+
+    await interaction.deferReply();
+
+
+    try {
+
+      console.log(
+        `Yeni PC isteği: ${budget} TL`
+      );
+
+
+      const queries =
+        createQueries(
+          budget,
+          cpu,
+          gpu
+        );
+
+
+      /*
+        Parçaları sırayla arıyoruz.
+        Böylece Akakçe'ye aynı anda çok
+        fazla istek göndermiyoruz.
+      */
+
+      const cpuProduct =
+        await findProduct(
+          queries.cpu
+        );
+
+      const gpuProduct =
+        await findProduct(
+          queries.gpu
+        );
+
+      const ramProduct =
+        await findProduct(
+          queries.ram
+        );
+
+      const ssdProduct =
+        await findProduct(
+          queries.ssd
+        );
+
+      const motherboardProduct =
+        await findProduct(
+          queries.motherboard
+        );
+
+      const psuProduct =
+        await findProduct(
+          queries.psu
+        );
+
+      const caseProduct =
+        await findProduct(
+          queries.case
+        );
+
+
+      const parts = [
+        {
+          name: "🧠 İşlemci",
+          product: cpuProduct
+        },
+        {
+          name: "🎮 Ekran Kartı",
+          product: gpuProduct
+        },
+        {
+          name: "🧩 RAM",
+          product: ramProduct
+        },
+        {
+          name: "💾 SSD",
+          product: ssdProduct
+        },
+        {
+          name: "🔧 Anakart",
+          product: motherboardProduct
+        },
+        {
+          name: "⚡ PSU",
+          product: psuProduct
+        },
+        {
+          name: "📦 Kasa",
+          product: caseProduct
+        }
+      ];
+
+
+      const missing =
+        parts.filter(
+          part => !part.product
+        );
+
+
+      if (missing.length > 0) {
+
+        await interaction.editReply(
+          "❌ Akakçe'den şu parçalar bulunamadı:\n\n" +
+          missing
+            .map(part => part.name)
+            .join("\n")
+        );
+
+        return;
+      }
+
+
+      let total = 0;
+
+
+      for (const part of parts) {
+
+        total +=
+          part.product.price;
+
+      }
+
+
+      const embed =
+        new EmbedBuilder()
+          .setTitle(
+            "🖥️ PC Builder Bot"
+          )
+          .setDescription(
+            "🌐 **Akakçe'den canlı fiyat kontrolü**\n\n" +
+            `💰 **Bütçe:** ${money(budget)}\n` +
+            `🎯 **Kullanım:** ${usage}\n` +
+            `🧠 **CPU:** ${cpu.toUpperCase()}\n` +
+            `🎮 **GPU:** ${gpu.toUpperCase()}`
+          );
+
+
+      for (const part of parts) {
+
+        const product =
+          part.product;
+
+        embed.addFields({
+
+          name:
+            part.name,
+
+          value:
+            `**${product.name}**\n` +
+            `💰 **${money(product.price)}**\n` +
+            `🔗 [Akakçe'de görüntüle](${product.url})`,
+
+          inline: false
+
+        });
+
+      }
+
 
       embed.addFields({
-        name: part.name,
+
+        name: "💰 TOPLAM",
+
         value:
-          `**${p.productName}**\n` +
-          `💵 ${money(p.lowestPrice)}\n` +
-          `🔗 [Akakçe'de görüntüle](${p.url})`,
+          `**${money(total)}**\n\n` +
+          (
+            total <= budget
+              ? `✅ Bütçenin **${money(
+                  budget - total
+                )}** altında.`
+              : `⚠️ Bütçeyi **${money(
+                  total - budget
+                )}** aşıyor.`
+          ),
+
         inline: false
+
       });
+
+
+      embed.setFooter({
+
+        text:
+          "Akakçe canlı fiyat kontrolü • PC Builder Bot"
+
+      });
+
+
+      await interaction.editReply({
+
+        embeds: [
+          embed
+        ]
+
+      });
+
+
+    } catch (error) {
+
+      console.error(
+        "PC TOPLA HATASI:",
+        error
+      );
+
+
+      await interaction.editReply(
+        "❌ Akakçe'ye bağlanırken hata oluştu.\n\n" +
+        "Console'daki hata mesajını kontrol et."
+      );
+
     }
 
-    embed.addFields({
-      name: "💰 Toplam",
-      value:
-        `**${money(total)}**\n` +
-        (total <= butce
-          ? `✅ Bütçenin ${money(butce - total)} altında`
-          : `⚠️ Bütçeyi ${money(total - butce)} aşıyor`),
-      inline: false
-    });
-
-    embed.setFooter({
-      text: "Fiyatlar Akakçe üzerinden alınmıştır • PC Builder Bot"
-    });
-
-    await interaction.editReply({
-      embeds: [embed]
-    });
-
-  } catch (error) {
-    console.error("PC TOPLA HATASI:", error);
-
-    await interaction.editReply(
-      "❌ Akakçe fiyatlarını alırken bir hata oluştu. Birkaç saniye sonra tekrar dene."
-    );
   }
-});
+);
 
-client.login(process.env.DISCORD_TOKEN);
+
+client.login(
+  process.env.DISCORD_TOKEN
+);
