@@ -1,12 +1,13 @@
 {
   "name": "pc-topla-bot",
   "version": "1.0.0",
-  "description": "Discord PC toplama botu",
+  "description": "Akakçe fiyatlarıyla PC toplama Discord botu",
   "main": "discord-bot.js",
   "scripts": {
     "start": "node discord-bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.27.0"
+    "discord.js": "^14.27.0",
+    "cheerio": "^1.1.2"
   }
 }
