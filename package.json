@@ -1,7 +1,6 @@
 {
   "name": "pc-topla-bot",
   "version": "1.0.0",
-  "description": "Akakçe fiyatlarıyla PC toplama Discord botu",
   "main": "discord-bot.js",
   "scripts": {
     "start": "node discord-bot.js"
