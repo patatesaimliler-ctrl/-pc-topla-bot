@@ -18,31 +18,19 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds]
 });
 
-/* =========================================================
-   AYARLAR
-========================================================= */
-
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
-const REEF_KEY = process.env.REEF_KEY;
+const APIFY_TOKEN = process.env.APIFY_TOKEN;
 
 if (!DISCORD_TOKEN) {
   throw new Error("DISCORD_TOKEN eksik");
 }
 
-if (!REEF_KEY) {
-  throw new Error("REEF_KEY eksik");
+if (!APIFY_TOKEN) {
+  throw new Error("APIFY_TOKEN eksik");
 }
 
 const sessions = new Map();
 
-/*
- * Kullanıcının bütçesinin maksimum ne kadar aşılabileceği.
- *
- * Örnek:
- * 75.000 TL -> 90.000 TL
- * 80.000 TL -> 95.000 TL
- * 100.000 TL -> 115.000 TL
- */
 const MAX_EXTRA_BUDGET = 15000;
 
 
@@ -102,7 +90,7 @@ const GAMES = {
 
 
 /* =========================================================
-   CPU HAVUZU
+   CPU
 ========================================================= */
 
 const CPU = {
@@ -112,31 +100,26 @@ const CPU = {
       query: "AMD Ryzen 5 5500",
       tier: 1
     },
-
     {
       name: "Ryzen 5 5600",
       query: "AMD Ryzen 5 5600",
       tier: 2
     },
-
     {
       name: "Ryzen 5 7500F",
       query: "AMD Ryzen 5 7500F",
       tier: 3
     },
-
     {
       name: "Ryzen 5 7600",
       query: "AMD Ryzen 5 7600",
       tier: 4
     },
-
     {
       name: "Ryzen 7 7700",
       query: "AMD Ryzen 7 7700",
       tier: 4
     },
-
     {
       name: "Ryzen 7 7800X3D",
       query: "AMD Ryzen 7 7800X3D",
@@ -150,31 +133,26 @@ const CPU = {
       query: "Intel Core i3 12100F",
       tier: 1
     },
-
     {
       name: "Intel Core i5-12400F",
       query: "Intel Core i5 12400F",
       tier: 2
     },
-
     {
       name: "Intel Core i5-13400F",
       query: "Intel Core i5 13400F",
       tier: 3
     },
-
     {
       name: "Intel Core i5-14400F",
       query: "Intel Core i5 14400F",
       tier: 4
     },
-
     {
       name: "Intel Core i5-14600KF",
       query: "Intel Core i5 14600KF",
       tier: 5
     },
-
     {
       name: "Intel Core i7-14700F",
       query: "Intel Core i7 14700F",
@@ -185,7 +163,7 @@ const CPU = {
 
 
 /* =========================================================
-   GPU HAVUZU
+   GPU
 ========================================================= */
 
 const GPU = {
@@ -195,43 +173,36 @@ const GPU = {
       query: "RTX 3050 8GB",
       tier: 1
     },
-
     {
       name: "RTX 4060 8GB",
       query: "RTX 4060 8GB",
       tier: 2
     },
-
     {
       name: "RTX 5060 8GB",
       query: "RTX 5060 8GB",
       tier: 3
     },
-
     {
       name: "RTX 5060 Ti 8GB",
       query: "RTX 5060 Ti 8GB",
       tier: 4
     },
-
     {
       name: "RTX 5060 Ti 16GB",
       query: "RTX 5060 Ti 16GB",
       tier: 4
     },
-
     {
       name: "RTX 5070 12GB",
       query: "RTX 5070 12GB",
       tier: 5
     },
-
     {
       name: "RTX 5070 Ti 16GB",
       query: "RTX 5070 Ti 16GB",
       tier: 6
     },
-
     {
       name: "RTX 5080 16GB",
       query: "RTX 5080 16GB",
@@ -245,43 +216,36 @@ const GPU = {
       query: "RX 6600 8GB",
       tier: 1
     },
-
     {
       name: "RX 7600 8GB",
       query: "RX 7600 8GB",
       tier: 2
     },
-
     {
       name: "RX 9060 XT 8GB",
       query: "RX 9060 XT 8GB",
       tier: 3
     },
-
     {
       name: "RX 9060 XT 16GB",
       query: "RX 9060 XT 16GB",
       tier: 4
     },
-
     {
       name: "RX 7700 XT 12GB",
       query: "RX 7700 XT 12GB",
       tier: 4
     },
-
     {
       name: "RX 7800 XT 16GB",
       query: "RX 7800 XT 16GB",
       tier: 5
     },
-
     {
       name: "RX 9070 XT 16GB",
       query: "RX 9070 XT 16GB",
       tier: 6
     },
-
     {
       name: "RX 7900 XTX 24GB",
       query: "RX 7900 XTX 24GB",
@@ -292,7 +256,7 @@ const GPU = {
 
 
 /* =========================================================
-   YARDIMCI
+   YARDIMCILAR
 ========================================================= */
 
 function money(value) {
@@ -310,9 +274,367 @@ function normalize(text) {
     .replace(/ç/g, "c");
 }
 
+function getTitle(product) {
+  return (
+    product.title ||
+    product.name ||
+    product.productName ||
+    ""
+  );
+}
+
+function getPrice(product) {
+  const values = [
+    product.price,
+    product.salePrice,
+    product.discountedPrice,
+    product.currentPrice,
+    product.sellingPrice
+  ];
+
+  for (const value of values) {
+    if (
+      typeof value === "number" &&
+      value > 0
+    ) {
+      return value;
+    }
+
+    if (typeof value === "string") {
+      const cleaned = value
+        .replace(/[^\d,.-]/g, "")
+        .replace(/\./g, "")
+        .replace(",", ".");
+
+      const number = Number(cleaned);
+
+      if (
+        Number.isFinite(number) &&
+        number > 0
+      ) {
+        return number;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getUrl(product) {
+  return (
+    product.url ||
+    product.productUrl ||
+    product.link ||
+    product.productLink ||
+    null
+  );
+}
+
 
 /* =========================================================
-   CPU PLATFORMU
+   APIFY
+   TEK ACTOR ÇALIŞTIRIP BİRDEN FAZLA ÜRÜNÜ TEK SEFERDE ARA
+========================================================= */
+
+async function apifySearch(searchQueries) {
+
+  const input = {
+    searchQueries,
+    startUrls: [],
+
+    /*
+     * Tasarruf:
+     * Her arama için yalnızca 8 ürün.
+     */
+    maxProductsPerSource: 8,
+
+    /*
+     * Fiyat düşükten yükseğe.
+     */
+    sort: "price_asc",
+
+    /*
+     * Yorumları kesinlikle çekme.
+     */
+    includeReviews: false,
+
+    maxReviewsPerProduct: 0,
+
+    country: "tr",
+
+    minRating: "any",
+
+    freeShippingOnly: false,
+
+    fastDeliveryOnly: false,
+
+    discountedOnly: false
+  };
+
+  const response = await fetch(
+    "https://api.apify.com/v2/acts/solidcode~trendyol-scraper/run-sync-get-dataset-items",
+    {
+      method: "POST",
+
+      headers: {
+        "Authorization":
+          `Bearer ${APIFY_TOKEN}`,
+
+        "Content-Type":
+          "application/json"
+      },
+
+      body: JSON.stringify(input)
+    }
+  );
+
+  const text =
+    await response.text();
+
+  if (!response.ok) {
+    throw new Error(
+      `Apify ${response.status}: ${text.slice(0, 500)}`
+    );
+  }
+
+  let data;
+
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Apify JSON hatası: ${text.slice(0, 500)}`
+    );
+  }
+
+  if (!Array.isArray(data)) {
+    throw new Error(
+      "Apify ürün listesi döndürmedi."
+    );
+  }
+
+  return data.filter(
+    item =>
+      !item.recordType ||
+      item.recordType === "product"
+  );
+}
+
+
+/* =========================================================
+   ÜRÜN FİLTRESİ
+========================================================= */
+
+function validProduct(
+  title,
+  type
+) {
+
+  const t =
+    normalize(title);
+
+  if (!t) {
+    return false;
+  }
+
+
+  if (type === "cpu") {
+
+    if (
+      !t.includes("ryzen") &&
+      !t.includes("core i") &&
+      !t.includes("core ultra")
+    ) {
+      return false;
+    }
+
+    if (
+      t.includes("sogutucu") ||
+      t.includes("cooler") ||
+      t.includes("fan") ||
+      t.includes("termal macun")
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  if (type === "gpu") {
+
+    if (
+      !t.includes("rtx ") &&
+      !t.includes("rx ") &&
+      !t.includes("geforce") &&
+      !t.includes("radeon")
+    ) {
+      return false;
+    }
+
+    if (
+      t.includes("laptop") ||
+      t.includes("notebook") ||
+      t.includes("kablo") ||
+      t.includes("stand")
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  if (type === "ram") {
+
+    return (
+      (
+        t.includes("ram") ||
+        t.includes("ddr4") ||
+        t.includes("ddr5")
+      ) &&
+      !t.includes("laptop") &&
+      !t.includes("notebook") &&
+      !t.includes("sodimm")
+    );
+  }
+
+
+  if (type === "ssd") {
+
+    if (
+      !t.includes("ssd") &&
+      !t.includes("nvme")
+    ) {
+      return false;
+    }
+
+    if (
+      t.includes("kutu") ||
+      t.includes("adaptör") ||
+      t.includes("adapter") ||
+      t.includes("enclosure")
+    ) {
+      return false;
+    }
+
+    if (
+      t.includes("120gb") ||
+      t.includes("128gb") ||
+      t.includes("240gb") ||
+      t.includes("256gb")
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  if (type === "motherboard") {
+
+    return (
+      t.includes("anakart") ||
+      t.includes("motherboard") ||
+      t.includes("b450") ||
+      t.includes("b550") ||
+      t.includes("a520") ||
+      t.includes("a620") ||
+      t.includes("b650") ||
+      t.includes("b760") ||
+      t.includes("b850") ||
+      t.includes("b860") ||
+      t.includes("z790") ||
+      t.includes("z890")
+    );
+  }
+
+
+  if (type === "psu") {
+
+    return (
+      t.includes("psu") ||
+      t.includes("power supply") ||
+      t.includes("guc kaynagi")
+    );
+  }
+
+
+  if (type === "case") {
+
+    if (
+      !t.includes("kasa") &&
+      !t.includes("pc case") &&
+      !t.includes("gaming case")
+    ) {
+      return false;
+    }
+
+    if (
+      t.includes("fan 1 adet") ||
+      t.includes("120mm fan") ||
+      t.includes("140mm fan") ||
+      t.includes("kasa ici fan")
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+
+  return true;
+}
+
+
+/* =========================================================
+   ÜRÜN DÖNÜŞTÜR
+========================================================= */
+
+function cleanProducts(
+  products,
+  type
+) {
+
+  return products
+    .map(product => ({
+      title:
+        getTitle(product),
+
+      price:
+        getPrice(product),
+
+      url:
+        getUrl(product),
+
+      brand:
+        product.brand ||
+        product.merchantName ||
+        product.sellerName ||
+        "Trendyol",
+
+      rating:
+        product.rating ||
+        null
+    }))
+
+    .filter(product =>
+      product.price &&
+      validProduct(
+        product.title,
+        type
+      )
+    )
+
+    .sort(
+      (a, b) =>
+        a.price - b.price
+    );
+}
+
+
+/* =========================================================
+   PLATFORM
 ========================================================= */
 
 function platformForCPU(cpu) {
@@ -338,269 +660,7 @@ function platformForCPU(cpu) {
 
 
 /* =========================================================
-   REEF API
-========================================================= */
-
-async function reefSearch(query) {
-
-  const response = await fetch(
-    "https://api.reefapi.com/trendyol/v1/search",
-    {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": REEF_KEY
-      },
-
-      body: JSON.stringify({
-        query,
-        page: 1,
-        max_pages: 1,
-        sort: "price_asc"
-      })
-    }
-  );
-
-  const text = await response.text();
-
-  let data;
-
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(
-      `Reef JSON hatası: ${text.slice(0, 300)}`
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      `Reef ${response.status}: ${
-        data?.message || text
-      }`
-    );
-  }
-
-  return (
-    data?.data?.results ||
-    data?.results ||
-    data?.data ||
-    []
-  );
-}
-
-
-/* =========================================================
-   ÜRÜN BİLGİLERİ
-========================================================= */
-
-function getTitle(product) {
-
-  return (
-    product.title ||
-    product.name ||
-    product.productName ||
-    product.product_title ||
-    ""
-  );
-}
-
-
-function getUrl(product) {
-
-  return (
-    product.url ||
-    product.productUrl ||
-    product.link ||
-    product.productLink ||
-    null
-  );
-}
-
-
-function getPrice(product) {
-
-  const values = [
-    product.price,
-    product.salePrice,
-    product.discountedPrice,
-    product.currentPrice,
-    product.sellingPrice
-  ];
-
-  for (const value of values) {
-
-    if (
-      typeof value === "number" &&
-      value > 0
-    ) {
-      return value;
-    }
-
-    if (
-      typeof value === "string"
-    ) {
-
-      const cleaned = value
-        .replace(/[^\d,.-]/g, "")
-        .replace(/\./g, "")
-        .replace(",", ".");
-
-      const number = Number(cleaned);
-
-      if (
-        Number.isFinite(number) &&
-        number > 0
-      ) {
-        return number;
-      }
-    }
-  }
-
-  return null;
-}
-
-
-/* =========================================================
-   ÜRÜN DOĞRULAMA
-========================================================= */
-
-function validProduct(title, type) {
-
-  const t = normalize(title);
-
-  if (!t) return false;
-
-
-  if (type === "cpu") {
-
-    return (
-      t.includes("ryzen") ||
-      t.includes("core i") ||
-      t.includes("core ultra")
-    );
-  }
-
-
-  if (type === "gpu") {
-
-    return (
-      t.includes("rtx ") ||
-      t.includes("rx ") ||
-      t.includes("geforce") ||
-      t.includes("radeon")
-    );
-  }
-
-
-  if (type === "ram") {
-
-    return (
-      (
-        t.includes("ram") ||
-        t.includes("ddr4") ||
-        t.includes("ddr5")
-      ) &&
-      !t.includes("laptop")
-    );
-  }
-
-
-  if (type === "ssd") {
-
-    return (
-      (
-        t.includes("ssd") ||
-        t.includes("nvme")
-      ) &&
-      !t.includes("kutu") &&
-      !t.includes("adapt") &&
-      !t.includes("case") &&
-      !t.includes("hard disk kutu")
-    );
-  }
-
-
-  if (type === "motherboard") {
-
-    return (
-      t.includes("anakart") ||
-      t.includes("motherboard") ||
-      t.includes("b550") ||
-      t.includes("b650") ||
-      t.includes("b850") ||
-      t.includes("b760") ||
-      t.includes("b860") ||
-      t.includes("z790") ||
-      t.includes("z890")
-    );
-  }
-
-
-  if (type === "psu") {
-
-    return (
-      t.includes("psu") ||
-      t.includes("power supply") ||
-      t.includes("guc kaynagi")
-    );
-  }
-
-
-  if (type === "case") {
-
-    return (
-      t.includes("kasa") ||
-      t.includes("pc case") ||
-      t.includes("gaming case")
-    );
-  }
-
-
-  return true;
-}
-
-
-/* =========================================================
-   REEF'TEN ADAY ÜRÜNLER
-========================================================= */
-
-async function findProducts(
-  query,
-  type
-) {
-
-  const results =
-    await reefSearch(query);
-
-  return results
-    .map(product => ({
-      title: getTitle(product),
-      price: getPrice(product),
-      url: getUrl(product),
-      brand:
-        product.brand ||
-        product.merchantName ||
-        "Trendyol"
-    }))
-    .filter(product =>
-      product.price &&
-      validProduct(
-        product.title,
-        type
-      )
-    )
-    .sort(
-      (a, b) =>
-        a.price - b.price
-    )
-    .slice(0, 8);
-}
-
-
-/* =========================================================
-   TIER HESABI
+   TIER
 ========================================================= */
 
 function targetTier(
@@ -615,32 +675,19 @@ function targetTier(
 
   if (budget < 35000) {
     tier = 1;
-  }
-
-  else if (budget < 50000) {
+  } else if (budget < 50000) {
     tier = 2;
-  }
-
-  else if (budget < 65000) {
+  } else if (budget < 65000) {
     tier = 3;
-  }
-
-  else if (budget < 80000) {
+  } else if (budget < 80000) {
     tier = 4;
-  }
-
-  else if (budget < 110000) {
+  } else if (budget < 110000) {
     tier = 5;
-  }
-
-  else if (budget < 150000) {
+  } else if (budget < 150000) {
     tier = 6;
-  }
-
-  else {
+  } else {
     tier = 7;
   }
-
 
   if (
     profile.gpuWeight >= 1.25
@@ -648,13 +695,11 @@ function targetTier(
     tier += 0.5;
   }
 
-
   if (
     profile.cpuWeight >= 1.20
   ) {
     tier += 0.25;
   }
-
 
   return Math.max(
     1,
@@ -667,7 +712,7 @@ function targetTier(
 
 
 /* =========================================================
-   UYUMLULUK KONTROLLERİ
+   UYUMLULUK
 ========================================================= */
 
 function compatibleRAM(
@@ -676,14 +721,14 @@ function compatibleRAM(
 ) {
 
   const t =
-    normalize(product.title);
+    normalize(
+      product.title
+    );
 
-  if (platform === "am4") {
+  if (
+    platform === "am4"
+  ) {
     return t.includes("ddr4");
-  }
-
-  if (platform === "am5") {
-    return t.includes("ddr5");
   }
 
   return t.includes("ddr5");
@@ -696,10 +741,13 @@ function compatibleMotherboard(
 ) {
 
   const t =
-    normalize(product.title);
+    normalize(
+      product.title
+    );
 
-  if (platform === "am4") {
-
+  if (
+    platform === "am4"
+  ) {
     return (
       t.includes("b450") ||
       t.includes("b550") ||
@@ -707,8 +755,9 @@ function compatibleMotherboard(
     );
   }
 
-  if (platform === "am5") {
-
+  if (
+    platform === "am5"
+  ) {
     return (
       t.includes("a620") ||
       t.includes("b650") ||
@@ -729,14 +778,12 @@ function compatibleMotherboard(
 }
 
 
-/* =========================================================
-   GÜÇ KAYNAĞI İHTİYACI
-========================================================= */
-
 function requiredPSU(gpu) {
 
   const t =
-    normalize(gpu.title);
+    normalize(
+      gpu.title
+    );
 
   if (
     t.includes("5080") ||
@@ -758,19 +805,20 @@ function requiredPSU(gpu) {
 
 
 /* =========================================================
-   EN UYGUN ÜRÜNÜ SEÇ
+   EN UCUZ UYGUN ÜRÜN
 ========================================================= */
 
 function cheapest(
-  list,
+  products,
   maxPrice = Infinity
 ) {
 
   return (
-    list
+    products
       .filter(
         product =>
-          product.price <= maxPrice
+          product.price <=
+          maxPrice
       )
       .sort(
         (a, b) =>
@@ -782,34 +830,21 @@ function cheapest(
 
 
 /* =========================================================
-   SİSTEM OLUŞTUR
+   PC OLUŞTUR
 ========================================================= */
 
-async function makeBuild(session) {
+async function makeBuild(
+  session
+) {
 
   const budget =
-    Number(session.budget);
-
-  /*
-   * ANA KURAL:
-   *
-   * Kullanıcı bütçesi + 15.000 TL.
-   *
-   * Örnek:
-   * 75K -> 90K
-   * 80K -> 95K
-   */
+    Number(
+      session.budget
+    );
 
   const maximum =
-    budget + MAX_EXTRA_BUDGET;
-
-
-  const cpuPool =
-    CPU[session.cpu];
-
-  const gpuPool =
-    GPU[session.gpu];
-
+    budget +
+    MAX_EXTRA_BUDGET;
 
   const wantedTier =
     targetTier(
@@ -819,485 +854,562 @@ async function makeBuild(session) {
 
 
   /*
-   * En mantıklı CPU'ları seç.
+   * Bütçeye göre sadece gerekli CPU/GPU adaylarını
+   * seçiyoruz.
    */
 
   const cpuCandidates =
-    [...cpuPool]
+    [...CPU[session.cpu]]
       .sort(
         (a, b) =>
           Math.abs(
-            a.tier - wantedTier
+            a.tier -
+            wantedTier
           ) -
           Math.abs(
-            b.tier - wantedTier
+            b.tier -
+            wantedTier
+          )
+      )
+      .slice(0, 4);
+
+
+  const gpuCandidates =
+    [...GPU[session.gpu]]
+      .sort(
+        (a, b) =>
+          Math.abs(
+            a.tier -
+            wantedTier
+          ) -
+          Math.abs(
+            b.tier -
+            wantedTier
           )
       )
       .slice(0, 4);
 
 
   /*
-   * En mantıklı GPU'ları seç.
+   * TEK APIFY ÇAĞRISI.
+   *
+   * Bu çok önemli:
+   * 7 farklı API çağrısı yerine
+   * bütün aramaları tek Actor çalıştırmasında
+   * gönderiyoruz.
    */
 
-  const gpuCandidates =
-    [...gpuPool]
-      .sort(
-        (a, b) =>
-          Math.abs(
-            a.tier - wantedTier
-          ) -
-          Math.abs(
-            b.tier - wantedTier
-          )
-      )
-      .slice(0, 5);
+  const queries = [];
 
 
-  console.log(
-    `🔎 Bütçe: ${budget} TL`
-  );
-
-  console.log(
-    `🔒 Maksimum: ${maximum} TL`
-  );
-
-  console.log(
-    `🎮 Oyun: ${session.game}`
-  );
+  for (
+    const cpu of cpuCandidates
+  ) {
+    queries.push(
+      cpu.query
+    );
+  }
 
 
-  /*
-   * CPU fiyatlarını bul.
-   */
+  for (
+    const gpu of gpuCandidates
+  ) {
+    queries.push(
+      gpu.query
+    );
+  }
 
-  const cpuProducts =
-    await Promise.all(
-      cpuCandidates.map(
-        cpu =>
-          findProducts(
-            cpu.query,
-            "cpu"
-          )
-            .then(products => ({
-              cpu,
-              products
-            }))
-            .catch(error => {
-              console.error(
-                "CPU arama:",
-                error.message
-              );
 
-              return {
-                cpu,
-                products: []
-              };
-            })
+  const cheapestCPU =
+    Math.max(
+      8000,
+      Math.floor(
+        maximum * 0.25
       )
     );
 
 
   /*
-   * GPU fiyatlarını bul.
+   * Genel parça aramaları.
    */
 
-  const gpuProducts =
-    await Promise.all(
-      gpuCandidates.map(
-        gpu =>
-          findProducts(
-            gpu.query,
-            "gpu"
-          )
-            .then(products => ({
-              gpu,
-              products
-            }))
-            .catch(error => {
-              console.error(
-                "GPU arama:",
-                error.message
-              );
+  queries.push(
+    "16GB DDR4 RAM",
+    "32GB DDR5 RAM",
+    "500GB NVMe SSD",
+    "1TB NVMe SSD",
+    "B550 anakart",
+    "B650 anakart",
+    "B760 anakart",
+    "650W PSU",
+    "750W PSU",
+    "850W PSU",
+    "ATX Gaming Kasa"
+  );
 
-              return {
-                gpu,
-                products: []
-              };
-            })
-      )
+
+  /*
+   * Aynı sorguyu tekrar gönderme.
+   */
+
+  const uniqueQueries =
+    [...new Set(
+      queries
+    )];
+
+
+  console.log(
+    "🔎 Apify sorguları:",
+    uniqueQueries
+  );
+
+
+  let rawProducts;
+
+  try {
+
+    rawProducts =
+      await apifySearch(
+        uniqueQueries
+      );
+
+  } catch (error) {
+
+    console.error(
+      "Apify hatası:",
+      error.message
+    );
+
+    return null;
+  }
+
+
+  /*
+   * Arama sonuçlarını parça türlerine ayır.
+   */
+
+  const allCPU =
+    cleanProducts(
+      rawProducts,
+      "cpu"
+    );
+
+  const allGPU =
+    cleanProducts(
+      rawProducts,
+      "gpu"
+    );
+
+  const allRAM =
+    cleanProducts(
+      rawProducts,
+      "ram"
+    );
+
+  const allSSD =
+    cleanProducts(
+      rawProducts,
+      "ssd"
+    );
+
+  const allMotherboard =
+    cleanProducts(
+      rawProducts,
+      "motherboard"
+    );
+
+  const allPSU =
+    cleanProducts(
+      rawProducts,
+      "psu"
+    );
+
+  const allCase =
+    cleanProducts(
+      rawProducts,
+      "case"
     );
 
 
   /*
-   * En ucuz uygun CPU/GPU adaylarını
-   * çıkarıyoruz.
+   * Sadece istediğimiz CPU ailesindeki ürünleri kullan.
    */
 
-  const cpuOptions = [];
+  const wantedCPU =
+    allCPU.filter(product => {
 
-  for (
-    const item of cpuProducts
-  ) {
+      const t =
+        normalize(
+          product.title
+        );
 
-    for (
-      const product
-      of item.products
-    ) {
+      if (
+        session.cpu === "amd"
+      ) {
+        return (
+          t.includes("ryzen")
+        );
+      }
 
-      cpuOptions.push({
-        ...product,
-        cpu: item.cpu
-      });
-    }
-  }
-
-
-  const gpuOptions = [];
-
-  for (
-    const item of gpuProducts
-  ) {
-
-    for (
-      const product
-      of item.products
-    ) {
-
-      gpuOptions.push({
-        ...product,
-        gpu: item.gpu
-      });
-    }
-  }
+      return (
+        t.includes("core i") ||
+        t.includes("core ultra")
+      );
+    });
 
 
   /*
-   * En iyi kombinasyonları oluştur.
+   * Sadece istediğimiz GPU ailesi.
+   */
+
+  const wantedGPU =
+    allGPU.filter(product => {
+
+      const t =
+        normalize(
+          product.title
+        );
+
+      if (
+        session.gpu === "nvidia"
+      ) {
+        return (
+          t.includes("rtx") ||
+          t.includes("geforce")
+        );
+      }
+
+      return (
+        t.includes("rx ") ||
+        t.includes("radeon")
+      );
+    });
+
+
+  /*
+   * CPU/GPU aday kombinasyonları.
    */
 
   const combinations = [];
 
+
   for (
-    const cpu of cpuOptions
+    const cpuProduct
+    of wantedCPU
   ) {
 
+    const cpuInfo =
+      cpuCandidates.find(
+        candidate =>
+          normalize(
+            cpuProduct.title
+          ).includes(
+            normalize(
+              candidate.name
+            )
+          )
+      );
+
+
+    if (!cpuInfo) {
+      continue;
+    }
+
+
     for (
-      const gpu of gpuOptions
+      const gpuProduct
+      of wantedGPU
     ) {
 
-      const platform =
-        platformForCPU(
-          cpu.cpu.name
+      const gpuInfo =
+        gpuCandidates.find(
+          candidate =>
+            normalize(
+              gpuProduct.title
+            ).includes(
+              normalize(
+                candidate.name
+              )
+            )
         );
 
-      /*
-       * Oyun ağırlığına göre skor.
-       */
 
-      const profile =
-        GAMES[session.game];
-
-      const score =
-        Math.abs(
-          cpu.cpu.tier -
-          wantedTier
-        ) +
-
-        Math.abs(
-          gpu.gpu.tier -
-          wantedTier
-        ) +
-
-        (
-          profile.cpuWeight >= 1.2
-            ? -cpu.cpu.tier * 0.08
-            : 0
-        ) +
-
-        (
-          profile.gpuWeight >= 1.2
-            ? -gpu.gpu.tier * 0.08
-            : 0
-        );
+      if (!gpuInfo) {
+        continue;
+      }
 
 
       combinations.push({
-        cpu,
-        gpu,
-        platform,
-        score
+
+        cpu: {
+          ...cpuProduct,
+          info: cpuInfo
+        },
+
+        gpu: {
+          ...gpuProduct,
+          info: gpuInfo
+        },
+
+        score:
+          Math.abs(
+            cpuInfo.tier -
+            wantedTier
+          ) +
+
+          Math.abs(
+            gpuInfo.tier -
+            wantedTier
+          )
+
       });
+
     }
   }
 
 
   combinations.sort(
     (a, b) =>
-      a.score - b.score
+      a.score -
+      b.score
   );
 
 
   /*
-   * En fazla 8 CPU/GPU kombinasyonu
-   * deniyoruz.
+   * En fazla 12 CPU/GPU kombinasyonu deniyoruz.
    */
 
   for (
     const combination
-    of combinations.slice(0, 8)
+    of combinations.slice(
+      0,
+      12
+    )
   ) {
 
-    try {
+    const cpu =
+      combination.cpu;
 
-      const {
-        cpu,
-        gpu,
-        platform
-      } = combination;
+    const gpu =
+      combination.gpu;
 
 
-      /*
-       * Kalan bütçeyi hesapla.
-       */
-
-      const remaining =
-        maximum -
-        cpu.price -
-        gpu.price;
+    const platform =
+      platformForCPU(
+        cpu.info.name
+      );
 
 
-      /*
-       * Destek parçaları için
-       * Reef araması.
-       */
+    /*
+     * Platforma uygun RAM.
+     */
 
-      const ramQuery =
-        platform === "am4"
-          ? "16GB 2x8 DDR4 3200 RAM"
-          : "32GB 2x16 DDR5 6000 RAM";
-
-
-      const motherboardQuery =
-        platform === "am4"
-          ? "B550 DDR4 AM4 anakart"
-          : platform === "am5"
-            ? "B650 DDR5 AM5 anakart"
-            : "B760 DDR5 anakart";
-
-
-      const psuWatts =
-        requiredPSU(gpu);
-
-
-      const psuQuery =
-        `${psuWatts}W 80 Plus Gold PSU`;
-
-
-      const ssdQuery =
-        budget >= 60000
-          ? "1TB NVMe SSD"
-          : "500GB NVMe SSD";
-
-
-      const caseQuery =
-        "ATX Mesh Airflow Gaming Kasa";
-
-
-      const [
-        ramProducts,
-        ssdProducts,
-        motherboardProducts,
-        psuProducts,
-        caseProducts
-      ] =
-        await Promise.all([
-
-          findProducts(
-            ramQuery,
-            "ram"
-          ),
-
-          findProducts(
-            ssdQuery,
-            "ssd"
-          ),
-
-          findProducts(
-            motherboardQuery,
-            "motherboard"
-          ),
-
-          findProducts(
-            psuQuery,
-            "psu"
-          ),
-
-          findProducts(
-            caseQuery,
-            "case"
+    const ram =
+      allRAM.find(
+        product =>
+          compatibleRAM(
+            platform,
+            product
           )
-
-        ]);
-
-
-      /*
-       * Uyumlu ürünleri seç.
-       */
-
-      const ram =
-        ramProducts.find(
-          product =>
-            compatibleRAM(
-              platform,
-              product
-            )
-        );
-
-
-      const motherboard =
-        motherboardProducts.find(
-          product =>
-            compatibleMotherboard(
-              platform,
-              product
-            )
-        );
-
-
-      const psu =
-        cheapest(
-          psuProducts
-        );
-
-
-      const ssd =
-        cheapest(
-          ssdProducts
-        );
-
-
-      const pcCase =
-        cheapest(
-          caseProducts
-        );
-
-
-      if (
-        !ram ||
-        !ssd ||
-        !motherboard ||
-        !psu ||
-        !pcCase
-      ) {
-        continue;
-      }
-
-
-      const parts = [
-
-        [
-          "🧠 İşlemci",
-          cpu
-        ],
-
-        [
-          "🎮 Ekran Kartı",
-          gpu
-        ],
-
-        [
-          "🧩 RAM",
-          ram
-        ],
-
-        [
-          "💾 SSD",
-          ssd
-        ],
-
-        [
-          "🔧 Anakart",
-          motherboard
-        ],
-
-        [
-          "⚡ PSU",
-          psu
-        ],
-
-        [
-          "📦 Kasa",
-          pcCase
-        ]
-
-      ];
-
-
-      const total =
-        parts.reduce(
-          (sum, [, product]) =>
-            sum + product.price,
-          0
-        );
-
-
-      /*
-       * ASIL BÜTÇE KİLİDİ
-       *
-       * 75K + 15K = 90K
-       *
-       * 90K üstüne çıkarsa
-       * sistem direkt reddedilir.
-       */
-
-      if (
-        total > maximum
-      ) {
-        console.log(
-          `❌ Kombinasyon bütçeyi geçti: ${money(total)}`
-        );
-
-        continue;
-      }
-
-
-      /*
-       * Sistem bulundu.
-       */
-
-      console.log(
-        `✅ Sistem bulundu: ${money(total)}`
       );
 
 
-      return {
+    /*
+     * Platforma uygun anakart.
+     */
 
-        parts,
-
-        total,
-
-        cpu:
-          cpu.title,
-
-        gpu:
-          gpu.title,
-
-        maximum
-
-      };
-
-    }
-
-    catch (error) {
-
-      console.error(
-        "Aday sistem hatası:",
-        error.message
+    const motherboard =
+      allMotherboard.find(
+        product =>
+          compatibleMotherboard(
+            platform,
+            product
+          )
       );
 
+
+    /*
+     * SSD.
+     */
+
+    const wantedSSD =
+      budget >= 60000
+        ? allSSD.find(
+            product => {
+
+              const t =
+                normalize(
+                  product.title
+                );
+
+              return (
+                t.includes("1tb") ||
+                t.includes("1000gb")
+              );
+            }
+          )
+        : allSSD.find(
+            product => {
+
+              const t =
+                normalize(
+                  product.title
+                );
+
+              return (
+                t.includes("500gb") ||
+                t.includes("512gb") ||
+                t.includes("1tb") ||
+                t.includes("1000gb")
+              );
+            }
+          );
+
+
+    /*
+     * PSU.
+     */
+
+    const required =
+      requiredPSU(
+        gpu
+      );
+
+
+    const psu =
+      allPSU.find(
+        product => {
+
+          const t =
+            normalize(
+              product.title
+            );
+
+          const match =
+            t.match(
+              /(\d{3,4})w/
+            );
+
+          if (!match) {
+            return true;
+          }
+
+          return (
+            Number(
+              match[1]
+            ) >= required
+          );
+        }
+      );
+
+
+    /*
+     * Kasa.
+     */
+
+    const pcCase =
+      allCase[0];
+
+
+    if (
+      !cpu ||
+      !gpu ||
+      !ram ||
+      !ssd ||
+      !motherboard ||
+      !psu ||
+      !pcCase
+    ) {
+      continue;
     }
 
+
+    const parts = [
+
+      [
+        "🧠 İşlemci",
+        cpu
+      ],
+
+      [
+        "🎮 Ekran Kartı",
+        gpu
+      ],
+
+      [
+        "🧩 RAM",
+        ram
+      ],
+
+      [
+        "💾 SSD",
+        wantedSSD
+      ],
+
+      [
+        "🔧 Anakart",
+        motherboard
+      ],
+
+      [
+        "⚡ PSU",
+        psu
+      ],
+
+      [
+        "📦 Kasa",
+        pcCase
+      ]
+
+    ];
+
+
+    const total =
+      parts.reduce(
+        (
+          sum,
+          [, product]
+        ) =>
+          sum +
+          product.price,
+        0
+      );
+
+
+    /*
+     * BÜTÇE KİLİDİ
+     *
+     * 80K -> maksimum 95K
+     * 95.001 -> RED
+     */
+
+    if (
+      total >
+      maximum
+    ) {
+      continue;
+    }
+
+
+    /*
+     * Sistem bulundu.
+     */
+
+    return {
+
+      parts,
+
+      total,
+
+      cpu:
+        cpu.title,
+
+      gpu:
+        gpu.title,
+
+      maximum
+
+    };
   }
 
 
@@ -1309,12 +1421,18 @@ async function makeBuild(session) {
    PANEL
 ========================================================= */
 
-function panel(session) {
+function panel(
+  session
+) {
 
   const embed =
     new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("🖥️ PC TOPLA")
+      .setColor(
+        0x5865f2
+      )
+      .setTitle(
+        "🖥️ PC TOPLA"
+      )
       .setDescription(
 
         "Seçimlerini yap, sonra " +
@@ -1322,7 +1440,9 @@ function panel(session) {
 
         `💰 **Bütçe:** ${
           session.budget
-            ? money(session.budget)
+            ? money(
+                session.budget
+              )
             : "Seçilmedi"
         }\n` +
 
@@ -1353,11 +1473,8 @@ function panel(session) {
           session.gpu === "nvidia"
             ? "NVIDIA"
             : "AMD"
-        }\n\n` +
+        }`
 
-        "💡 Sistem bütçeyi mümkün olduğunca " +
-        "aşmamaya çalışır. Gerekirse maksimum " +
-        "**15.000 TL** esneklik kullanabilir."
       );
 
 
@@ -1366,21 +1483,31 @@ function panel(session) {
       .addComponents(
 
         new ButtonBuilder()
-          .setCustomId("budget")
-          .setLabel("💰 Bütçe")
+          .setCustomId(
+            "budget"
+          )
+          .setLabel(
+            "💰 Bütçe"
+          )
           .setStyle(
             ButtonStyle.Primary
           ),
 
         new ButtonBuilder()
-          .setCustomId("game")
-          .setLabel("🎮 Oyun")
+          .setCustomId(
+            "game"
+          )
+          .setLabel(
+            "🎮 Oyun"
+          )
           .setStyle(
             ButtonStyle.Secondary
           ),
 
         new ButtonBuilder()
-          .setCustomId("cpu")
+          .setCustomId(
+            "cpu"
+          )
           .setLabel(
             session.cpu === "amd"
               ? "🧠 AMD"
@@ -1391,7 +1518,9 @@ function panel(session) {
           ),
 
         new ButtonBuilder()
-          .setCustomId("gpu")
+          .setCustomId(
+            "gpu"
+          )
           .setLabel(
             session.gpu === "nvidia"
               ? "🎮 NVIDIA"
@@ -1409,7 +1538,9 @@ function panel(session) {
       .addComponents(
 
         new ButtonBuilder()
-          .setCustomId("create")
+          .setCustomId(
+            "create"
+          )
           .setLabel(
             "🚀 PC'Yİ OLUŞTUR"
           )
@@ -1437,7 +1568,9 @@ function panel(session) {
 const commands = [
 
   new SlashCommandBuilder()
-    .setName("pctopla")
+    .setName(
+      "pctopla"
+    )
     .setDescription(
       "Bütçene ve oyununa göre PC oluştur."
     )
@@ -1483,9 +1616,7 @@ client.once(
         "✅ /pctopla hazır."
       );
 
-    }
-
-    catch (error) {
+    } catch (error) {
 
       console.error(
         "Komut kayıt hatası:",
@@ -1493,7 +1624,6 @@ client.once(
       );
 
     }
-
   }
 );
 
@@ -1508,9 +1638,7 @@ client.on(
 
     try {
 
-      /* =====================================================
-         /pctopla
-      ===================================================== */
+      /* /pctopla */
 
       if (
         interaction.isChatInputCommand() &&
@@ -1530,25 +1658,20 @@ client.on(
 
         };
 
-
         sessions.set(
           interaction.user.id,
           session
         );
 
-
         await interaction.reply(
           panel(session)
         );
-
 
         return;
       }
 
 
-      /* =====================================================
-         BUTONLAR
-      ===================================================== */
+      /* BUTTON */
 
       if (
         interaction.isButton()
@@ -1558,7 +1681,6 @@ client.on(
           sessions.get(
             interaction.user.id
           );
-
 
         if (!session) {
 
@@ -1575,9 +1697,7 @@ client.on(
         }
 
 
-        /* ===================================================
-           BÜTÇE
-        =================================================== */
+        /* BÜTÇE */
 
         if (
           interaction.customId ===
@@ -1593,7 +1713,6 @@ client.on(
                 "💰 Bütçeni Gir"
               );
 
-
           const input =
             new TextInputBuilder()
               .setCustomId(
@@ -1603,36 +1722,29 @@ client.on(
                 "Maksimum bütçe (TL)"
               )
               .setPlaceholder(
-                "Örn: 75000"
+                "Örn: 80000"
               )
               .setStyle(
                 TextInputStyle.Short
               )
               .setRequired(true);
 
-
           modal.addComponents(
-
             new ActionRowBuilder()
               .addComponents(
                 input
               )
-
           );
-
 
           await interaction.showModal(
             modal
           );
 
-
           return;
         }
 
 
-        /* ===================================================
-           OYUN
-        =================================================== */
+        /* OYUN */
 
         if (
           interaction.customId ===
@@ -1659,13 +1771,13 @@ client.on(
 
                     value,
 
-                    emoji: "🎮"
+                    emoji:
+                      "🎮"
 
                   })
                 )
 
               );
-
 
           await interaction.reply({
 
@@ -1685,14 +1797,11 @@ client.on(
 
           });
 
-
           return;
         }
 
 
-        /* ===================================================
-           CPU
-        =================================================== */
+        /* CPU */
 
         if (
           interaction.customId ===
@@ -1710,19 +1819,28 @@ client.on(
               .addOptions(
 
                 {
-                  label: "AMD",
-                  value: "amd",
-                  emoji: "🧠"
+                  label:
+                    "AMD",
+
+                  value:
+                    "amd",
+
+                  emoji:
+                    "🧠"
                 },
 
                 {
-                  label: "Intel",
-                  value: "intel",
-                  emoji: "🧠"
+                  label:
+                    "Intel",
+
+                  value:
+                    "intel",
+
+                  emoji:
+                    "🧠"
                 }
 
               );
-
 
           await interaction.reply({
 
@@ -1742,14 +1860,11 @@ client.on(
 
           });
 
-
           return;
         }
 
 
-        /* ===================================================
-           GPU
-        =================================================== */
+        /* GPU */
 
         if (
           interaction.customId ===
@@ -1767,19 +1882,28 @@ client.on(
               .addOptions(
 
                 {
-                  label: "NVIDIA",
-                  value: "nvidia",
-                  emoji: "🎮"
+                  label:
+                    "NVIDIA",
+
+                  value:
+                    "nvidia",
+
+                  emoji:
+                    "🎮"
                 },
 
                 {
-                  label: "AMD",
-                  value: "amd",
-                  emoji: "🎮"
+                  label:
+                    "AMD",
+
+                  value:
+                    "amd",
+
+                  emoji:
+                    "🎮"
                 }
 
               );
-
 
           await interaction.reply({
 
@@ -1799,14 +1923,11 @@ client.on(
 
           });
 
-
           return;
         }
 
 
-        /* ===================================================
-           PC OLUŞTUR
-        =================================================== */
+        /* OLUŞTUR */
 
         if (
           interaction.customId ===
@@ -1879,14 +2000,9 @@ client.on(
                     )
                   }\n\n` +
 
-                  "🧠 İşlemci aranıyor...\n" +
-
-                  "🎮 Ekran kartı aranıyor...\n" +
-
-                  "🛒 ReefAPI canlı fiyatları kontrol ediliyor...\n" +
-
-                  "🔧 Parça uyumluluğu kontrol ediliyor...\n" +
-
+                  "🔎 Trendyol canlı fiyatları taranıyor...\n" +
+                  "🧠 İşlemci ve ekran kartı seçiliyor...\n" +
+                  "🔧 Uyumluluk kontrol ediliyor...\n" +
                   "💰 Son bütçe kontrolü yapılıyor..."
 
                 )
@@ -1904,10 +2020,6 @@ client.on(
             );
 
 
-          /* =================================================
-             BULUNAMADI
-          ================================================= */
-
           if (!result) {
 
             await interaction.editReply({
@@ -1923,8 +2035,8 @@ client.on(
                   )
                   .setDescription(
 
-                    "ReefAPI'deki canlı ürünlerde " +
-                    "uygun parçalarla sistem oluşturamadım.\n\n" +
+                    "Canlı fiyatlarda uygun " +
+                    "parçalarla sistem oluşturamadım.\n\n" +
 
                     `💰 **Bütçe:** ${
                       money(
@@ -1932,15 +2044,12 @@ client.on(
                       )
                     }\n` +
 
-                    `📈 **İzin verilen maksimum:** ${
+                    `📈 **Maksimum:** ${
                       money(
                         session.budget +
                         MAX_EXTRA_BUDGET
                       )
-                    }\n\n` +
-
-                    "💡 Başka bir CPU/GPU markası " +
-                    "veya daha yüksek bütçe deneyebilirsin."
+                    }`
 
                   )
 
@@ -1950,21 +2059,11 @@ client.on(
 
             });
 
-
             return;
           }
 
 
-          /* =================================================
-             SONUÇ
-          ================================================= */
-
-          const remaining =
-            session.budget -
-            result.total;
-
-
-          const overBudget =
+          const over =
             result.total >
             session.budget;
 
@@ -1972,7 +2071,7 @@ client.on(
           const embed =
             new EmbedBuilder()
               .setColor(
-                overBudget
+                over
                   ? 0xf1c40f
                   : 0x57f287
               )
@@ -2007,7 +2106,7 @@ client.on(
                   )
                 }\n` +
 
-                `📈 **İzin verilen maksimum:** ${
+                `📈 **Maksimum:** ${
                   money(
                     result.maximum
                   )
@@ -2020,29 +2119,25 @@ client.on(
                 }\n\n` +
 
                 (
-                  overBudget
+                  over
 
-                    ? `🟡 **Bütçenin ${
+                    ? `🟡 Bütçenin ${
                         money(
                           result.total -
                           session.budget
                         )
-                      } üzerinde**`
+                      } üzerinde`
 
-                    : `🟢 **Bütçenin ${
+                    : `🟢 Bütçenin ${
                         money(
                           session.budget -
                           result.total
                         )
-                      } altında**`
+                      } altında`
                 )
 
               );
 
-
-          /* =================================================
-             PARÇALAR
-          ================================================= */
 
           for (
             const [
@@ -2074,9 +2169,11 @@ client.on(
 
                 (
                   product.url
-                    ? `[🛒 Ürünü görüntüle](${
+
+                    ? `[🛒 Ürüne git](${
                         product.url
                       })`
+
                     : "🔗 Link bulunamadı"
                 ),
 
@@ -2086,10 +2183,6 @@ client.on(
 
           }
 
-
-          /* =================================================
-             120K+ MİZAH
-          ================================================= */
 
           if (
             session.budget >=
@@ -2102,8 +2195,7 @@ client.on(
                 "💀 120K+ Bölgesi",
 
               value:
-                "Bu bütçede artık ekran kartı " +
-                "sistemi değil, sistemi ekran kartı seçiyor.",
+                "Bu bütçede artık ekran kartı sistemi değil, sistemi ekran kartı seçiyor.",
 
               inline: false
 
@@ -2122,16 +2214,12 @@ client.on(
 
           });
 
-
           return;
         }
-
       }
 
 
-      /* =====================================================
-         SELECT MENÜLER
-      ===================================================== */
+      /* SELECT MENÜ */
 
       if (
         interaction.isStringSelectMenu()
@@ -2141,7 +2229,6 @@ client.on(
           sessions.get(
             interaction.user.id
           );
-
 
         if (!session) {
 
@@ -2158,8 +2245,6 @@ client.on(
         }
 
 
-        /* OYUN */
-
         if (
           interaction.customId ===
           "game_select"
@@ -2167,7 +2252,6 @@ client.on(
 
           session.game =
             interaction.values[0];
-
 
           await interaction.update({
 
@@ -2182,12 +2266,9 @@ client.on(
 
           });
 
-
           return;
         }
 
-
-        /* CPU */
 
         if (
           interaction.customId ===
@@ -2196,7 +2277,6 @@ client.on(
 
           session.cpu =
             interaction.values[0];
-
 
           await interaction.update({
 
@@ -2212,12 +2292,9 @@ client.on(
 
           });
 
-
           return;
         }
 
-
-        /* GPU */
 
         if (
           interaction.customId ===
@@ -2226,7 +2303,6 @@ client.on(
 
           session.gpu =
             interaction.values[0];
-
 
           await interaction.update({
 
@@ -2242,16 +2318,12 @@ client.on(
 
           });
 
-
           return;
         }
-
       }
 
 
-      /* =====================================================
-         BÜTÇE MODALI
-      ===================================================== */
+      /* MODAL */
 
       if (
         interaction.isModalSubmit() &&
@@ -2264,13 +2336,12 @@ client.on(
             interaction.user.id
           );
 
-
         if (!session) {
 
           await interaction.reply({
 
             content:
-              "❌ Oturum bulunamadı. `/pctopla` ile yeniden başla.",
+              "❌ Oturum bulunamadı.",
 
             ephemeral: true
 
@@ -2327,21 +2398,22 @@ client.on(
 
           content:
 
-            `✅ Bütçe **${
-              money(budget)
-            }** olarak ayarlandı.\n` +
+            `✅ Bütçe: **${
+              money(
+                budget
+              )
+            }**\n` +
 
-            `📈 Gerekirse sistem **${
+            `📈 Maksimum sistem bütçesi: **${
               money(
                 budget +
                 MAX_EXTRA_BUDGET
               )
-            }** seviyesine kadar çıkabilir.`,
+            }**`,
 
           ephemeral: true
 
         });
-
 
         return;
       }
@@ -2355,7 +2427,6 @@ client.on(
         error
       );
 
-
       try {
 
         if (
@@ -2366,15 +2437,13 @@ client.on(
           await interaction.followUp({
 
             content:
-              "❌ Bir hata oluştu. Railway Logs'u kontrol et.",
+              "❌ Bir hata oluştu. GitHub Actions logunu kontrol et.",
 
             ephemeral: true
 
           });
 
-        }
-
-        else {
+        } else {
 
           await interaction.reply({
 
@@ -2387,12 +2456,9 @@ client.on(
 
         }
 
-      }
-
-      catch {}
+      } catch {}
 
     }
-
   }
 );
 
