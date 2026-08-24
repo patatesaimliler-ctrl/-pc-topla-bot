@@ -1,11 +1,12 @@
 {
   "name": "pc-builder-bot",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "main": "discord-bot.js",
   "scripts": {
     "start": "node discord-bot.js"
   },
   "dependencies": {
+    "@google/genai": "^1.0.0",
     "discord.js": "^14.24.2"
   }
 }
