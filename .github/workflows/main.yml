@@ -22,5 +22,5 @@ jobs:
       - name: Botu çalıştır
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          REEF_KEY: ${{ secrets.REEF_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
         run: node discord-bot.js
